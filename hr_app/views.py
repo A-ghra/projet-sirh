@@ -959,74 +959,25 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsGestionnaireOrAdmin]
 
 
-def _collect_dashboard_stats():
-    today = timezone.now().date()
-    total = Employee.objects.filter(status='Active').count()
-    payroll_mass = Employee.objects.filter(status='Active').aggregate(t=Sum('salary_base'))['t'] or 0
-    absences_today = Absence.objects.filter(start_date__lte=today, end_date__gte=today, status='Approved').count()
-    open_recruitments = Recruitment.objects.filter(status='Open').count()
-    trainings = Training.objects.count()
-    evaluations = PerformanceReview.objects.count()
-    dept_stats = list(Department.objects.annotate(count=Count('employees')).values('name', 'count'))
-    gender_stats = {
-        'hommes': Employee.objects.filter(gender='M', status='Active').count(),
-        'femmes': Employee.objects.filter(gender='F', status='Active').count(),
-    }
-    total_attendance = Attendance.objects.count()
-    absent_count = Attendance.objects.filter(status='Absent').count()
-    absenteeism_rate = round((absent_count / total_attendance * 100), 1) if total_attendance else 0
-    contracts_expiring_soon = Contract.objects.filter(
-        is_active=True,
-        end_date__gte=today,
-        end_date__lte=today + timedelta(days=60),
-    ).count()
-    recent_logs = AuditLogSerializer(AuditLog.objects.all()[:10], many=True).data
-
-    monthly_headcount = []
-    monthly_absences = []
-    for i in range(5, -1, -1):
-        month_start = (today.replace(day=1) - timedelta(days=i * 30)).replace(day=1)
-        if month_start.month == 12:
-            month_end = month_start.replace(year=month_start.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            month_end = month_start.replace(month=month_start.month + 1, day=1) - timedelta(days=1)
-        label = month_start.strftime('%b %Y')
-        headcount = Employee.objects.filter(
-            status='Active', hire_date__lte=month_end,
-        ).count()
-        abs_count = Absence.objects.filter(
-            start_date__lte=month_end, end_date__gte=month_start, status='Approved',
-        ).count()
-        monthly_headcount.append({'month': label, 'count': headcount})
-        monthly_absences.append({'month': label, 'count': abs_count})
-
-    hr_comparison = {
-        'labels': ['Effectif', 'Recrutements', 'Formations', 'Évaluations', 'Absences/jour'],
-        'values': [total, open_recruitments, trainings, evaluations, absences_today],
-    }
-
-    return {
-        'total_employees': total,
-        'payroll_mass': float(payroll_mass),
-        'absences_today': absences_today,
-        'open_recruitments': open_recruitments,
-        'trainings_count': trainings,
-        'evaluations_count': evaluations,
-        'absenteeism_rate': absenteeism_rate,
-        'contracts_expiring_soon': contracts_expiring_soon,
-        'department_distribution': dept_stats,
-        'gender_distribution': gender_stats,
-        'monthly_headcount': monthly_headcount,
-        'monthly_absences': monthly_absences,
-        'hr_comparison': hr_comparison,
-        'recent_activities': recent_logs,
-    }
+def _collect_dashboard_stats(request=None):
+    from .dashboard_analytics import collect_dashboard_analytics
+    params = request.GET if request else {}
+    return collect_dashboard_analytics(
+        month=params.get('month'),
+        year=params.get('year'),
+        department_id=params.get('department'),
+        employee_id=params.get('employee'),
+        contract_type=params.get('contract_type'),
+        gender=params.get('gender'),
+        age_range=params.get('age_range'),
+        site=params.get('site'),
+    )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
-    return Response(_collect_dashboard_stats())
+    return Response(_collect_dashboard_stats(request))
 
 
 @api_view(['GET'])

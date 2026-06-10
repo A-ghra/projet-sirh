@@ -10,28 +10,19 @@ from .permissions import get_user_role, ROLE_MANAGER, ROLE_EMPLOYE
 from .talent_service import training_dashboard_stats, talent_overview_stats_readonly
 
 
-def _collect_dashboard_stats():
-    from django.db.models import Sum
-    from .models import Department, AuditLog
-    from .serializers import AuditLogSerializer
-
-    today = timezone.now().date()
-    total = Employee.objects.filter(status='Active').count()
-    payroll_mass = Employee.objects.filter(status='Active').aggregate(t=Sum('salary_base'))['t'] or 0
-    absences_today = Absence.objects.filter(
-        start_date__lte=today, end_date__gte=today, status='Approved',
-    ).count()
-    dept_stats = list(Department.objects.annotate(count=Count('employees')).values('name', 'count'))
-    return {
-        'total_employees': total,
-        'payroll_mass': float(payroll_mass),
-        'absences_today': absences_today,
-        'open_recruitments': Recruitment.objects.filter(status='Open').count(),
-        'trainings_count': Training.objects.count(),
-        'evaluations_count': PerformanceReview.objects.count(),
-        'recent_activities': AuditLogSerializer(AuditLog.objects.all()[:10], many=True).data,
-        'department_distribution': dept_stats,
-    }
+def _collect_dashboard_stats(request=None):
+    from .dashboard_analytics import collect_dashboard_analytics
+    params = request.GET if request else {}
+    return collect_dashboard_analytics(
+        month=params.get('month'),
+        year=params.get('year'),
+        department_id=params.get('department'),
+        employee_id=params.get('employee'),
+        contract_type=params.get('contract_type'),
+        gender=params.get('gender'),
+        age_range=params.get('age_range'),
+        site=params.get('site'),
+    )
 
 
 def recruitment_sync_stats():
@@ -128,7 +119,7 @@ def collect_sync_payload(request=None):
     year = request.GET.get('year') if request else None
     payload = {
         'timestamp': timezone.now().isoformat(),
-        'dashboard': _collect_dashboard_stats(),
+        'dashboard': _collect_dashboard_stats(request),
         'formation': formation_sync_stats(),
         'performance': talent_overview_stats_readonly(),
         'recruitment': recruitment_sync_stats(),
