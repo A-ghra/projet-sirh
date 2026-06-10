@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page introuvable — OTOMIA RH</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="js/config.js"></script>
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-card panel" style="text-align:center">
+            <h1 style="color:#1a5f9e">Page introuvable</h1>
+            <p>Impossible de charger la page demandée.</p>
+            <p id="bad-url" class="hint-text" style="word-break:break-all"></p>
+            <button class="btn btn-primary" id="btn-login">Retour à la connexion</button>
+            <button class="btn btn-secondary" id="btn-app">Ouvrir l'application</button>
+        </div>
+    </div>
+    <script>
+        document.getElementById("bad-url").textContent = "URL : " + location.href;
+        document.getElementById("btn-login").onclick = () => otomiaNavigate("login.html", "404-recovery");
+        document.getElementById("btn-app").onclick = () => otomiaNavigate("index.html", "404-recovery");
+    </script>
+</body>
+</html>
