@@ -114,7 +114,7 @@ def csrf_token_view(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
-    LOGIN_FAIL = "Nom d'utilisateur ou mot de passe incorrect."
+    LOGIN_FAIL = "Identifiant ou mot de passe incorrect."
     serializer = LoginSerializer(data=request.data)
     if not serializer.is_valid():
         return Response({'error': LOGIN_FAIL}, status=status.HTTP_401_UNAUTHORIZED)
@@ -500,9 +500,27 @@ class AbsenceViewSet(viewsets.ModelViewSet):
     queryset = Absence.objects.all().select_related('employee')
     serializer_class = AbsenceSerializer
 
+    def get_queryset(self):
+        from .presence_service import filter_absence_queryset
+        return filter_absence_queryset(self.request.user)
+
     def perform_create(self, serializer):
+        from .presence_service import LEAVE_FEATURE_TO_ABSENCE, map_leave_feature_key, get_user_employee
+        absence_type = serializer.validated_data.get('absence_type', '')
+        if absence_type in LEAVE_FEATURE_TO_ABSENCE or absence_type.startswith('conge_'):
+            serializer.validated_data['absence_type'] = map_leave_feature_key(absence_type)
+        emp = get_user_employee(self.request.user)
+        if get_user_role(self.request.user) == ROLE_EMPLOYE and emp:
+            serializer.validated_data['employee'] = emp
         obj = serializer.save()
+        from .presence_service import notify_leave_request_created
+        notify_leave_request_created(obj)
         log_action(self.request.user, 'Demande congé', 'Congés', obj.employee.full_name, self.request)
+
+    @action(detail=False, methods=['post'], url_path='leave-request')
+    def leave_request(self, request):
+        """Alias POST /api/absences/leave-request/ — demande de congé."""
+        return self.create(request)
 
     @action(detail=True, methods=['post'])
     def approve_absence(self, request, pk=None):
@@ -526,31 +544,309 @@ class AbsenceViewSet(viewsets.ModelViewSet):
 
 
 class AttendanceViewSet(viewsets.ModelViewSet):
-    queryset = Attendance.objects.all()
+    queryset = Attendance.objects.all().select_related('employee', 'employee__department')
     serializer_class = AttendanceSerializer
-    permission_classes = [IsManagerOrAbove]
+
+    def get_permissions(self):
+        auth_actions = (
+            'list', 'retrieve', 'report', 'grid', 'summary', 'leaves', 'attendance_missions',
+            'create', 'pointages', 'conges', 'leave_request', 'auto_absences',
+            'submit_justification', 'contest_absence',
+        )
+        if self.action in auth_actions:
+            return [IsAuthenticated()]
+        return [IsManagerOrAbove()]
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx['allow_manual_absence'] = False
+        return ctx
+
+    def _after_attendance_saved(self, obj):
+        from .auto_absence_service import resolve_alert_if_covered
+        from .models import AbsenceAlert
+        from django.utils import timezone as tz
+        for alert in AbsenceAlert.objects.filter(employee=obj.employee, date=obj.date, status='pending'):
+            resolve_alert_if_covered(alert)
+        if obj.record_source == 'auto' and obj.event_type != 'absence':
+            obj.absence_workflow_status = 'regularized'
+            obj.save(update_fields=['absence_workflow_status'])
+            AbsenceAlert.objects.filter(
+                employee=obj.employee, date=obj.date, status='auto_created',
+            ).update(status='regularized', resolved_at=tz.now())
+
+    def get_queryset(self):
+        from .presence_service import filter_attendance_queryset
+        qs = filter_attendance_queryset(self.request.user)
+        month = self.request.query_params.get('month')
+        year = self.request.query_params.get('year')
+        employee_id = self.request.query_params.get('employee')
+        if month and year:
+            from .presence_service import _month_bounds, _parse_int
+            from django.utils import timezone as tz
+            today = tz.now().date()
+            m = _parse_int(month, today.month)
+            y = _parse_int(year, today.year)
+            start, end = _month_bounds(y, m)
+            qs = qs.filter(date__gte=start, date__lte=end)
+        if employee_id:
+            qs = qs.filter(employee_id=employee_id)
+        return qs.order_by('-date', '-id')
+
+    def _upsert_attendance(self, request, payload):
+        emp_id = payload.get('employee')
+        att_date = payload.get('date')
+        if emp_id and att_date:
+            existing = Attendance.objects.filter(employee_id=emp_id, date=att_date).first()
+            if existing:
+                update_serializer = self.get_serializer(existing, data=payload, partial=True)
+                update_serializer.is_valid(raise_exception=True)
+                self.perform_update(update_serializer)
+                return Response(update_serializer.data)
+        serializer = self.get_serializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def create(self, request, *args, **kwargs):
+        return self._upsert_attendance(request, request.data)
+
+    def _save_attendance_from_serializer(self, serializer):
+        from .presence_service import prepare_attendance_payload
+        raw_type = self.request.data.get('event_type')
+        merged = dict(serializer.validated_data)
+        prepared = prepare_attendance_payload(merged)
+        if raw_type == 'late':
+            prepared['status'] = 'Late'
+        if serializer.validated_data.get('status'):
+            prepared['status'] = serializer.validated_data['status']
+        return serializer.save(
+            status=prepared['status'],
+            event_type=prepared['event_type'],
+            check_in=prepared.get('check_in'),
+            check_out=serializer.validated_data.get('check_out'),
+            notes=serializer.validated_data.get('notes', ''),
+        )
 
     def perform_create(self, serializer):
-        obj = serializer.save()
+        from .presence_service import user_can_create_attendance_for, sync_attendance_related_records
+        from rest_framework.exceptions import PermissionDenied
+        employee = serializer.validated_data.get('employee')
+        employee_id = employee.id if employee else None
+        if not user_can_create_attendance_for(self.request.user, employee_id):
+            raise PermissionDenied('Vous ne pouvez pas enregistrer ce pointage.')
+        obj = self._save_attendance_from_serializer(serializer)
+        sync_attendance_related_records(obj)
+        self._after_attendance_saved(obj)
         log_action(
             self.request.user, 'Enregistrement présence', 'Présences',
-            f'{obj.employee.full_name} — {obj.date} ({obj.status})', self.request,
+            f'{obj.employee.full_name} — {obj.date} ({obj.event_type})', self.request,
             new_value=obj.status,
         )
 
     def perform_update(self, serializer):
-        old_status = self.get_object().status
-        obj = serializer.save()
+        from .presence_service import user_can_edit_attendance
+        from rest_framework.exceptions import PermissionDenied
+        instance = serializer.instance
+        if not instance:
+            instance = self.get_object()
+        if not user_can_edit_attendance(self.request.user, attendance=instance):
+            raise PermissionDenied('Modification non autorisée.')
+        old_status = instance.status
+        obj = self._save_attendance_from_serializer(serializer)
+        from .presence_service import sync_attendance_related_records
+        sync_attendance_related_records(obj)
+        self._after_attendance_saved(obj)
         log_action(
             self.request.user, 'Modification présence', 'Présences',
             f'{obj.employee.full_name} — {obj.date}', self.request,
             old_value=old_status, new_value=obj.status,
         )
 
+    def perform_destroy(self, instance):
+        from .presence_service import user_can_delete_attendance
+        if not user_can_delete_attendance(self.request.user, instance):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Suppression non autorisée.')
+        log_action(
+            self.request.user, 'Suppression présence', 'Présences',
+            f'{instance.employee.full_name} — {instance.date}', self.request,
+        )
+        instance.delete()
+
+    @action(detail=False, methods=['get'], url_path='report')
+    def report(self, request):
+        from .presence_service import build_attendance_report
+        data = build_attendance_report(
+            request.user,
+            month=request.query_params.get('month'),
+            year=request.query_params.get('year'),
+            search=request.query_params.get('search') or request.query_params.get('q'),
+            department_id=request.query_params.get('department'),
+        )
+        return Response(data)
+
+    @action(detail=False, methods=['get'], url_path='grid')
+    def grid(self, request):
+        from .presence_service import build_attendance_grid
+        data = build_attendance_grid(
+            request.user,
+            month=request.query_params.get('month'),
+            year=request.query_params.get('year'),
+            employee_id=request.query_params.get('employee'),
+            department_id=request.query_params.get('department'),
+        )
+        return Response(data)
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        from .presence_service import build_attendance_summary
+        data = build_attendance_summary(
+            request.user,
+            month=request.query_params.get('month'),
+            year=request.query_params.get('year'),
+            search=request.query_params.get('search') or request.query_params.get('q'),
+        )
+        return Response(data)
+
+    @action(detail=False, methods=['post'], url_path='pointages')
+    def pointages(self, request):
+        """Alias POST /api/attendance/pointages/ — enregistrement pointage."""
+        return self._upsert_attendance(request, request.data)
+
+    def _create_leave_request(self, request):
+        """Crée une demande de congé (Absence) — partagé par les alias conges / leave-request."""
+        absence_vs = AbsenceViewSet()
+        absence_vs.request = request
+        absence_vs.format_kwarg = None
+        absence_vs.action = 'create'
+        serializer = AbsenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        absence_vs.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='conges')
+    def conges(self, request):
+        """Alias POST /api/attendance/conges/ — demande de congé."""
+        return self._create_leave_request(request)
+
+    @action(detail=False, methods=['post'], url_path='leave-request')
+    def leave_request(self, request):
+        """Alias POST /api/attendance/leave-request/ — demande de congé."""
+        return self._create_leave_request(request)
+
+    @action(detail=False, methods=['get'], url_path='leaves')
+    def leaves(self, request):
+        """Alias GET /api/attendance/leaves/ — liste des congés."""
+        absence_vs = AbsenceViewSet()
+        absence_vs.request = request
+        absence_vs.format_kwarg = None
+        absence_vs.action = 'list'
+        qs = absence_vs.filter_queryset(absence_vs.get_queryset())
+        serializer = AbsenceSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get', 'post'], url_path='missions')
+    def attendance_missions(self, request):
+        """Alias GET/POST /api/attendance/missions/ — liste ou création de mission."""
+        if request.method == 'GET':
+            mission_vs = MissionViewSet()
+            mission_vs.request = request
+            mission_vs.format_kwarg = None
+            mission_vs.action = 'list'
+            qs = mission_vs.filter_queryset(mission_vs.get_queryset())
+            serializer = MissionSerializer(qs, many=True)
+            return Response(serializer.data)
+        payload = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if payload.get('location') and not payload.get('destination'):
+            payload['destination'] = payload.pop('location')
+        mission_vs = MissionViewSet()
+        mission_vs.request = request
+        mission_vs.format_kwarg = None
+        mission_vs.action = 'create'
+        serializer = MissionSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        mission_vs.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='auto-absences')
+    def auto_absences(self, request):
+        """Liste des absences automatiques."""
+        qs = self.filter_queryset(self.get_queryset()).filter(
+            record_source='auto', event_type='absence',
+        )
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+        if month and year:
+            from .presence_service import _month_bounds, _parse_int
+            from django.utils import timezone as tz
+            today = tz.now().date()
+            m = _parse_int(month, today.month)
+            y = _parse_int(year, today.year)
+            start, end = _month_bounds(y, m)
+            qs = qs.filter(date__gte=start, date__lte=end)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='confirm-absence')
+    def confirm_absence(self, request, pk=None):
+        from .auto_absence_service import regularize_auto_absence
+        obj = self.get_object()
+        if obj.record_source != 'auto':
+            return Response({'error': 'Cette absence n\'est pas automatique.'}, status=400)
+        note = request.data.get('note', '')
+        obj = regularize_auto_absence(obj, request.user, 'confirmed', note)
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=['post'], url_path='regularize-absence')
+    def regularize_absence(self, request, pk=None):
+        from .auto_absence_service import regularize_auto_absence
+        obj = self.get_object()
+        if obj.record_source != 'auto':
+            return Response({'error': 'Cette absence n\'est pas automatique.'}, status=400)
+        note = request.data.get('note', '')
+        obj = regularize_auto_absence(obj, request.user, 'regularized', note)
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=['post'], url_path='contest-absence')
+    def contest_absence(self, request, pk=None):
+        from .auto_absence_service import regularize_auto_absence
+        obj = self.get_object()
+        if obj.record_source != 'auto':
+            return Response({'error': 'Cette absence n\'est pas automatique.'}, status=400)
+        note = request.data.get('note', '')
+        obj = regularize_auto_absence(obj, request.user, 'contested', note)
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=['post'], url_path='submit-justification', parser_classes=[MultiPartParser, FormParser, JSONParser])
+    def submit_justification(self, request, pk=None):
+        from .auto_absence_service import submit_absence_justification
+        from .presence_service import get_user_employee
+        obj = self.get_object()
+        emp = get_user_employee(request.user)
+        role = get_user_role(request.user)
+        if role == ROLE_EMPLOYE and (not emp or emp.id != obj.employee_id):
+            return Response({'error': 'Non autorisé.'}, status=403)
+        file_obj = request.FILES.get('file')
+        if file_obj:
+            allowed = ('.pdf', '.jpg', '.jpeg', '.png')
+            ext = '.' + file_obj.name.rsplit('.', 1)[-1].lower() if '.' in file_obj.name else ''
+            if ext not in allowed:
+                return Response({'error': 'Format non autorisé. PDF, JPG, JPEG, PNG uniquement.'}, status=400)
+        note = request.data.get('note', '')
+        obj = submit_absence_justification(obj, note=note, file_obj=file_obj)
+        log_action(request.user, 'Justification absence', 'Présences', f'{obj.employee.full_name} — {obj.date}', request)
+        return Response(self.get_serializer(obj).data)
+
 
 class MissionViewSet(viewsets.ModelViewSet):
     queryset = Mission.objects.all()
     serializer_class = MissionSerializer
+
+    def get_queryset(self):
+        from .presence_service import filter_mission_queryset
+        return filter_mission_queryset(self.request.user)
 
     def perform_create(self, serializer):
         obj = serializer.save()
@@ -959,74 +1255,25 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsGestionnaireOrAdmin]
 
 
-def _collect_dashboard_stats():
-    today = timezone.now().date()
-    total = Employee.objects.filter(status='Active').count()
-    payroll_mass = Employee.objects.filter(status='Active').aggregate(t=Sum('salary_base'))['t'] or 0
-    absences_today = Absence.objects.filter(start_date__lte=today, end_date__gte=today, status='Approved').count()
-    open_recruitments = Recruitment.objects.filter(status='Open').count()
-    trainings = Training.objects.count()
-    evaluations = PerformanceReview.objects.count()
-    dept_stats = list(Department.objects.annotate(count=Count('employees')).values('name', 'count'))
-    gender_stats = {
-        'hommes': Employee.objects.filter(gender='M', status='Active').count(),
-        'femmes': Employee.objects.filter(gender='F', status='Active').count(),
-    }
-    total_attendance = Attendance.objects.count()
-    absent_count = Attendance.objects.filter(status='Absent').count()
-    absenteeism_rate = round((absent_count / total_attendance * 100), 1) if total_attendance else 0
-    contracts_expiring_soon = Contract.objects.filter(
-        is_active=True,
-        end_date__gte=today,
-        end_date__lte=today + timedelta(days=60),
-    ).count()
-    recent_logs = AuditLogSerializer(AuditLog.objects.all()[:10], many=True).data
-
-    monthly_headcount = []
-    monthly_absences = []
-    for i in range(5, -1, -1):
-        month_start = (today.replace(day=1) - timedelta(days=i * 30)).replace(day=1)
-        if month_start.month == 12:
-            month_end = month_start.replace(year=month_start.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            month_end = month_start.replace(month=month_start.month + 1, day=1) - timedelta(days=1)
-        label = month_start.strftime('%b %Y')
-        headcount = Employee.objects.filter(
-            status='Active', hire_date__lte=month_end,
-        ).count()
-        abs_count = Absence.objects.filter(
-            start_date__lte=month_end, end_date__gte=month_start, status='Approved',
-        ).count()
-        monthly_headcount.append({'month': label, 'count': headcount})
-        monthly_absences.append({'month': label, 'count': abs_count})
-
-    hr_comparison = {
-        'labels': ['Effectif', 'Recrutements', 'Formations', 'Évaluations', 'Absences/jour'],
-        'values': [total, open_recruitments, trainings, evaluations, absences_today],
-    }
-
-    return {
-        'total_employees': total,
-        'payroll_mass': float(payroll_mass),
-        'absences_today': absences_today,
-        'open_recruitments': open_recruitments,
-        'trainings_count': trainings,
-        'evaluations_count': evaluations,
-        'absenteeism_rate': absenteeism_rate,
-        'contracts_expiring_soon': contracts_expiring_soon,
-        'department_distribution': dept_stats,
-        'gender_distribution': gender_stats,
-        'monthly_headcount': monthly_headcount,
-        'monthly_absences': monthly_absences,
-        'hr_comparison': hr_comparison,
-        'recent_activities': recent_logs,
-    }
+def _collect_dashboard_stats(request=None):
+    from .dashboard_analytics import collect_dashboard_analytics
+    params = request.GET if request else {}
+    return collect_dashboard_analytics(
+        month=params.get('month'),
+        year=params.get('year'),
+        department_id=params.get('department'),
+        employee_id=params.get('employee'),
+        contract_type=params.get('contract_type'),
+        gender=params.get('gender'),
+        age_range=params.get('age_range'),
+        site=params.get('site'),
+    )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
-    return Response(_collect_dashboard_stats())
+    return Response(_collect_dashboard_stats(request))
 
 
 @api_view(['GET'])

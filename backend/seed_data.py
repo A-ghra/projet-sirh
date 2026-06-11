@@ -314,9 +314,7 @@ def seed_db():
     SystemSettings.get_settings()
 
     print('Base de données OTOMIA RH peuplée.')
-    print('Comptes de test (mot de passe: otomia2026):')
-    for u, _, role, _, _ in USERS:
-        print(f'  - {u} ({role})')
+    print('Utilisateurs initialisés. Les identifiants sont gérés en base Django uniquement.')
 
 
 if __name__ == '__main__':

@@ -31,6 +31,13 @@ class WorkScheduleSettingsSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class PresenceAbsenceSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .models import PresenceAbsenceSettings
+        model = PresenceAbsenceSettings
+        fields = '__all__'
+
+
 class SystemBackupSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
 
@@ -209,18 +216,113 @@ class EmployeeTrainingResultSerializer(serializers.ModelSerializer):
 
 class AbsenceSerializer(serializers.ModelSerializer):
     employee_name = serializers.ReadOnlyField(source='employee.full_name')
+    absence_type = serializers.CharField()
 
     class Meta:
         model = Absence
         fields = '__all__'
 
+    def validate_absence_type(self, value):
+        from .models import Absence
+        from .presence_service import LEAVE_FEATURE_TO_ABSENCE, map_leave_feature_key
+        if value in LEAVE_FEATURE_TO_ABSENCE or (isinstance(value, str) and value.startswith('conge_')):
+            value = map_leave_feature_key(value)
+        valid = {c[0] for c in Absence.ABSENCE_TYPES}
+        if value not in valid:
+            raise serializers.ValidationError(f'Type de congé invalide : {value}')
+        return value
+
+    def validate(self, attrs):
+        start = attrs.get('start_date')
+        end = attrs.get('end_date')
+        if start and end and end < start:
+            raise serializers.ValidationError({
+                'end_date': 'La date de fin doit être postérieure ou égale à la date de début.',
+            })
+        return attrs
+
 
 class AttendanceSerializer(serializers.ModelSerializer):
     employee_name = serializers.ReadOnlyField(source='employee.full_name')
+    employee_matricule = serializers.ReadOnlyField(source='employee.matricule')
+    employee_position = serializers.ReadOnlyField(source='employee.position')
+    employee_department = serializers.SerializerMethodField()
+    manager_name = serializers.SerializerMethodField()
+    justification_file_url = serializers.SerializerMethodField()
+    event_type = serializers.CharField(required=False)
 
     class Meta:
         model = Attendance
         fields = '__all__'
+
+    def get_manager_name(self, obj):
+        if obj.responsible_manager:
+            return obj.responsible_manager.full_name
+        if obj.employee and obj.employee.manager:
+            return obj.employee.manager.full_name
+        return '-'
+
+    def get_justification_file_url(self, obj):
+        if obj.justification_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.justification_file.url)
+            return obj.justification_file.url
+        return None
+
+    def get_employee_department(self, obj):
+        if obj.employee and obj.employee.department:
+            return obj.employee.department.name
+        return '-'
+
+    def to_internal_value(self, data):
+        mutable = data.copy() if hasattr(data, 'copy') else dict(data)
+        for field in ('check_in', 'check_out'):
+            if mutable.get(field) == '':
+                mutable[field] = None
+        return super().to_internal_value(mutable)
+
+    def _null_if_empty_time(self, value):
+        if value in (None, ''):
+            return None
+        return value
+
+    def validate_check_in(self, value):
+        return self._null_if_empty_time(value)
+
+    def validate_check_out(self, value):
+        return self._null_if_empty_time(value)
+
+    def validate_event_type(self, value):
+        from .models import Attendance
+        if value == 'late':
+            return 'presence'
+        if value == 'absence' and not self.context.get('allow_manual_absence'):
+            raise serializers.ValidationError(
+                'Les absences ne peuvent pas être saisies manuellement. '
+                'Elles sont détectées automatiquement par le système.',
+            )
+        valid = {c[0] for c in Attendance.EVENT_TYPE_CHOICES}
+        if value not in valid:
+            raise serializers.ValidationError(f'Type d\'action invalide : {value}')
+        return value
+
+    def validate(self, attrs):
+        from .models import Attendance, WorkScheduleSettings
+        from .presence_service import detect_attendance_status
+        raw_type = self.initial_data.get('event_type', attrs.get('event_type', 'presence'))
+        force_late = raw_type == 'late'
+        event_type = attrs.get('event_type', 'presence')
+        att_date = attrs.get('date')
+        check_in = attrs.get('check_in')
+        if event_type == 'presence' and not check_in and not force_late:
+            attrs['check_in'] = None
+        if att_date and event_type:
+            schedule = WorkScheduleSettings.get_settings()
+            attrs['status'] = 'Late' if force_late else detect_attendance_status(
+                event_type, check_in, att_date, schedule,
+            )
+        return attrs
 
 
 class MissionSerializer(serializers.ModelSerializer):

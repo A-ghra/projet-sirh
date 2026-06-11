@@ -8,6 +8,7 @@ const SETTINGS_MENU = [
     { id: "logo", icon: "fa-image", label: "Logo & Identité visuelle" },
     { id: "bulletins", icon: "fa-file-invoice-dollar", label: "Configuration Bulletins" },
     { id: "horaires", icon: "fa-clock", label: "Horaires de Travail" },
+    { id: "presences", icon: "fa-fingerprint", label: "Présences & Congés" },
     { id: "rapports", icon: "fa-chart-bar", label: "Configuration Rapports RH" },
     { id: "modules", icon: "fa-puzzle-piece", label: "Personnalisation Modules" },
     { id: "champs", icon: "fa-list-alt", label: "Champs Personnalisés" },
@@ -91,6 +92,7 @@ window.loadSettingsSection = async (section) => {
         logo: renderSettingsLogo,
         bulletins: renderSettingsBulletins,
         horaires: renderSettingsHoraires,
+        presences: renderSettingsPresences,
         rapports: renderSettingsRapports,
         modules: renderSettingsModules,
         champs: renderSettingsChamps,
@@ -131,7 +133,7 @@ async function renderSettingsLogo() {
     settingsCompany = await apiGet("/company-settings/");
     const c = settingsCompany;
     const logoSrc = c.logo_display_url
-        ? (c.logo_display_url.startsWith("http") ? c.logo_display_url : `${API_HOST}${c.logo_display_url}`)
+        ? (c.logo_display_url.startsWith("http") ? c.logo_display_url : `${getApiHost()}${c.logo_display_url}`)
         : "";
     document.getElementById("settings-content").innerHTML = `
         <h3><i class="fas fa-image"></i> Logo & Identité Visuelle</h3>
@@ -219,6 +221,46 @@ async function renderSettingsHoraires() {
         </div>
         <button class="btn btn-primary" style="margin-top:12px" onclick="saveWorkScheduleSettings()">Enregistrer horaires</button>`;
 }
+
+async function renderSettingsPresences() {
+    const s = await apiGet("/presence-absence-settings/");
+    document.getElementById("settings-content").innerHTML = `
+        <h3><i class="fas fa-fingerprint"></i> Présences & Congés — Absences automatiques</h3>
+        <p class="feature-help">Configurez la détection automatique des absences, les notifications manager et l'impact paie.</p>
+        <div class="form-row">
+            <label><input type="checkbox" id="pa-auto_absence_enabled" ${s.auto_absence_enabled ? "checked" : ""}> Activer la détection automatique des absences</label>
+        </div>
+        <div class="form-row">
+            <div><label>Heure limite de clôture</label><input type="time" id="pa-cutoff_time" value="${(s.cutoff_time || "18:00").slice(0, 5)}"></div>
+        </div>
+        <h4 style="margin-top:16px;color:#1a5f9e">Notifications</h4>
+        <div class="form-row">
+            <label><input type="checkbox" id="pa-notify_internal" ${s.notify_internal ? "checked" : ""}> Notification interne OTOMIA RH</label>
+            <label><input type="checkbox" id="pa-notify_email" ${s.notify_email ? "checked" : ""}> Email professionnel</label>
+            <label><input type="checkbox" id="pa-notify_dashboard" ${s.notify_dashboard ? "checked" : ""}> Centre de notifications Tableau de bord</label>
+        </div>
+        <h4 style="margin-top:16px;color:#1a5f9e">Impact sur la paie</h4>
+        <div class="form-row">
+            <label><input type="radio" name="payroll_rule" value="unjustified" ${s.payroll_impact_rule === "unjustified" ? "checked" : ""}> Absence non justifiée (déduction)</label>
+            <label><input type="radio" name="payroll_rule" value="justified" ${s.payroll_impact_rule === "justified" ? "checked" : ""}> Absence justifiée (sans déduction si confirmée)</label>
+            <label><input type="radio" name="payroll_rule" value="no_impact" ${s.payroll_impact_rule === "no_impact" ? "checked" : ""}> Sans impact salarial</label>
+        </div>
+        <p class="feature-help" style="margin-top:12px">Planifiez la commande <code>python manage.py process_auto_absences</code> en fin de journée (cron).</p>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="savePresenceAbsenceSettings()">Enregistrer</button>`;
+}
+
+window.savePresenceAbsenceSettings = async () => {
+    const data = {
+        auto_absence_enabled: document.getElementById("pa-auto_absence_enabled")?.checked ?? true,
+        cutoff_time: document.getElementById("pa-cutoff_time")?.value || "18:00",
+        notify_internal: document.getElementById("pa-notify_internal")?.checked ?? true,
+        notify_email: document.getElementById("pa-notify_email")?.checked ?? true,
+        notify_dashboard: document.getElementById("pa-notify_dashboard")?.checked ?? true,
+        payroll_impact_rule: document.querySelector('input[name="payroll_rule"]:checked')?.value || "unjustified",
+    };
+    await apiFetch("/presence-absence-settings/", { method: "PATCH", body: JSON.stringify(data) });
+    alert("Paramètres Présences & Congés enregistrés.");
+};
 
 window.saveWorkScheduleSettings = async () => {
     const data = _collectByPrefix("wh", [
@@ -343,7 +385,7 @@ window.createUser = async () => {
 window.suspendUser = async (id) => { await apiPost(`/settings/users/${id}/suspend/`, {}); renderSettingsUtilisateurs(); };
 window.activateUser = async (id) => { await apiPost(`/settings/users/${id}/activate/`, {}); renderSettingsUtilisateurs(); };
 window.resetUserPassword = async (id, name) => {
-    const pwd = prompt(`Nouveau mot de passe pour ${name}:`, "otomia2026");
+    const pwd = prompt(`Nouveau mot de passe pour ${name}:`);
     if (!pwd) return;
     await apiPost(`/settings/users/${id}/reset_password/`, { password: pwd });
     alert(`Mot de passe réinitialisé pour ${name}.`);
@@ -486,7 +528,7 @@ window.uploadLogoFile = async () => {
     fd.append("logo", file);
     const r = await apiFormPost("/company-settings/logo/upload/", fd);
     if (r.logo_display_url) {
-        const url = r.logo_display_url.startsWith("http") ? r.logo_display_url : `${API_HOST}${r.logo_display_url}`;
+        const url = r.logo_display_url.startsWith("http") ? r.logo_display_url : `${getApiHost()}${r.logo_display_url}`;
         document.getElementById("logo-preview-box").innerHTML = `<img class="portail-avatar" src="${url}" id="logo-preview">`;
     }
     applyCompanyBranding();
@@ -498,7 +540,7 @@ window.uploadLogoUrl = async () => {
     if (!url) return alert("Entrez une URL HTTPS.");
     const r = await apiPost("/company-settings/logo/url/", { logo_url: url });
     if (r.logo_display_url) {
-        const src = r.logo_display_url.startsWith("http") ? r.logo_display_url : `${API_HOST}${r.logo_display_url}`;
+        const src = r.logo_display_url.startsWith("http") ? r.logo_display_url : `${getApiHost()}${r.logo_display_url}`;
         document.getElementById("logo-preview-box").innerHTML = `<img class="portail-avatar" src="${src}">`;
     }
     applyCompanyBranding();

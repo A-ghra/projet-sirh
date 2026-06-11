@@ -123,7 +123,7 @@ function renderApplicantsTable() {
     const canWrite = canWriteModule("recrutement");
     el.innerHTML = _recApplicants.map((c) => {
         const photo = c.photo_url
-            ? `<img src="${API_HOST}${c.photo_url}" class="applicant-thumb" alt="">`
+            ? `<img src="${getApiHost()}${c.photo_url}" class="applicant-thumb" alt="">`
             : `<span class="applicant-thumb-placeholder"><i class="fas fa-user"></i></span>`;
         return `<tr>
             <td>${photo}</td>
@@ -144,7 +144,7 @@ function renderApplicantsTable() {
 }
 
 window.viewApplicantCV = (id) => {
-    const url = `${API_BASE_URL}/applicants/${id}/resume_file/?inline=1`;
+    const url = `${getApiBaseUrl()}/applicants/${id}/resume_file/?inline=1`;
     let modal = document.getElementById("cv-preview-modal");
     if (!modal) {
         modal = document.createElement("div");
@@ -166,7 +166,7 @@ window.viewApplicantCV = (id) => {
         modal.addEventListener("click", (e) => { if (e.target === modal) closeCVPreview(); });
     }
     document.getElementById("cv-preview-frame").src = url;
-    document.getElementById("cv-preview-dl").href = `${API_BASE_URL}/applicants/${id}/resume_file/`;
+    document.getElementById("cv-preview-dl").href = `${getApiBaseUrl()}/applicants/${id}/resume_file/`;
     modal.hidden = false;
 };
 window.closeCVPreview = () => {
@@ -227,7 +227,9 @@ window.hireApplicant = async (id) => {
         const r = await apiPost(`/applicants/${id}/hire/`, { send_email: true, force_password_change: true });
         let msg = r.message;
         if (r.credentials) {
-            msg += `\n\nCompte créé :\nUtilisateur : ${r.credentials.username}\nMot de passe : ${r.credentials.password}`;
+            msg += r.credentials.email_sent
+                ? "\n\nUn email contenant les identifiants a été envoyé au candidat."
+                : "\n\nCompte créé. Contactez le service RH pour transmettre les identifiants.";
         }
         showToast("Employé intégré avec succès");
         if (r.credentials) showToast(`Compte : ${r.credentials.username}`, "info", 5000);
@@ -414,7 +416,7 @@ window.showApplicantForm = async (id = null) => {
                 <fieldset class="panel"><legend>CV & compte utilisateur</legend>
                     <div class="form-row">
                         <input type="file" id="cand-resume" accept=".pdf,.docx,.doc">
-                        <span class="hint-text">${data.resume_url ? `<a href="${API_HOST}${data.resume_url}" target="_blank">CV actuel</a>` : "PDF ou DOCX"}</span>
+                        <span class="hint-text">${data.resume_url ? `<a href="${getApiHost()}${data.resume_url}" target="_blank">CV actuel</a>` : "PDF ou DOCX"}</span>
                     </div>
                     <div class="form-row">
                         <label>Compte utilisateur ?</label>
@@ -469,7 +471,7 @@ window.showApplicantForm = async (id = null) => {
         if (data.photo_url) {
             document.getElementById("cand-photo-hint").textContent = "Photo enregistrée";
             document.getElementById("cand-photo-preview").innerHTML =
-                `<img src="${API_HOST}${data.photo_url}" class="photo-preview-img" alt="Photo">`;
+                `<img src="${getApiHost()}${data.photo_url}" class="photo-preview-img" alt="Photo">`;
         }
         document.getElementById("cand-benefits").innerHTML =
             (data.benefits || []).map((b, i) => _benefitRowHtml(b, i)).join("");
@@ -526,13 +528,20 @@ window.saveApplicantForm = async () => {
 };
 
 async function apiFormPut(path, formData) {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
         method: "PUT",
         credentials: "include",
-        headers: { "X-CSRFToken": await getCsrfToken() },
+        headers: {
+            Accept: "application/json",
+            "X-CSRFToken": await getCsrfToken(),
+            "X-Requested-With": "XMLHttpRequest",
+        },
         body: formData,
     });
-    const data = response.headers.get("content-type")?.includes("json") ? await response.json() : null;
-    if (!response.ok) throw new Error(data?.error || data?.detail || `Erreur ${response.status}`);
-    return data;
+    if (typeof otomiaHandleApiResponse === "function") {
+        return otomiaHandleApiResponse(response, `apiFormPut ${path}`);
+    }
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Erreur ${response.status}`);
+    try { return JSON.parse(text); } catch (e) { return { raw: text }; }
 }

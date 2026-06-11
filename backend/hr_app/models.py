@@ -184,6 +184,35 @@ class WorkScheduleSettings(models.Model):
         return 'Horaires de travail'
 
 
+class PresenceAbsenceSettings(models.Model):
+    """Paramètres de détection automatique des absences."""
+    PAYROLL_RULE_CHOICES = [
+        ('justified', 'Absence justifiée'),
+        ('unjustified', 'Absence non justifiée (déduction)'),
+        ('no_impact', 'Sans impact salarial'),
+    ]
+    auto_absence_enabled = models.BooleanField(default=True)
+    cutoff_time = models.TimeField(default=time(18, 0))
+    notify_internal = models.BooleanField(default=True)
+    notify_email = models.BooleanField(default=True)
+    notify_dashboard = models.BooleanField(default=True)
+    payroll_impact_rule = models.CharField(
+        max_length=20, choices=PAYROLL_RULE_CHOICES, default='unjustified',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'Paramètres absences automatiques'
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return 'Paramètres absences automatiques'
+
+
 class SystemSettings(models.Model):
     """Paramètres système globaux OTOMIA RH."""
     CURRENCY_CHOICES = [('USD', 'USD'), ('CDF', 'CDF')]
@@ -495,18 +524,75 @@ class Attendance(models.Model):
         ('Late', 'Retard'),
         ('Absent', 'Absent'),
     ]
+    EVENT_TYPE_CHOICES = [
+        ('presence', 'Présence'),
+        ('absence', 'Absence'),
+        ('leave', 'Congé'),
+        ('mission', 'Mission'),
+    ]
+    RECORD_SOURCE_CHOICES = [
+        ('manual', 'Manuel'),
+        ('auto', 'Automatique'),
+    ]
+    ABSENCE_WORKFLOW_CHOICES = [
+        ('pending_validation', 'En attente de validation'),
+        ('confirmed', 'Confirmée'),
+        ('regularized', 'Régularisée'),
+        ('contested', 'Contestée'),
+    ]
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='attendances')
     date = models.DateField()
     check_in = models.TimeField(blank=True, null=True)
     check_out = models.TimeField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Present')
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPE_CHOICES, default='presence')
     notes = models.TextField(blank=True, null=True)
+    record_source = models.CharField(max_length=10, choices=RECORD_SOURCE_CHOICES, default='manual')
+    absence_workflow_status = models.CharField(
+        max_length=30, choices=ABSENCE_WORKFLOW_CHOICES, blank=True, null=True,
+    )
+    generated_at = models.DateTimeField(blank=True, null=True)
+    responsible_manager = models.ForeignKey(
+        Employee, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='managed_auto_absences',
+    )
+    justification_file = models.FileField(upload_to='absence_justifications/', blank=True, null=True)
+    justification_note = models.TextField(blank=True, default='')
 
     class Meta:
         unique_together = ('employee', 'date')
 
     def __str__(self):
         return f"{self.employee.full_name} - {self.date}"
+
+
+class AbsenceAlert(models.Model):
+    """Alerte manager avant création automatique d'une absence."""
+    STATUS_CHOICES = [
+        ('pending', 'En attente'),
+        ('regularized', 'Régularisée'),
+        ('auto_created', 'Absence créée'),
+    ]
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='absence_alerts')
+    date = models.DateField()
+    manager = models.ForeignKey(
+        Employee, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='team_absence_alerts',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notified_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    attendance = models.ForeignKey(
+        Attendance, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='source_alert',
+    )
+
+    class Meta:
+        unique_together = ('employee', 'date')
+        ordering = ['-date', '-id']
+
+    def __str__(self):
+        return f"Alerte {self.employee.full_name} — {self.date}"
 
 
 class Mission(models.Model):
@@ -576,6 +662,9 @@ class Notification(models.Model):
         ('payslip', 'Nouveau bulletin'),
         ('leave_approved', 'Congé validé'),
         ('leave_rejected', 'Congé refusé'),
+        ('leave_pending', 'Demande de congé'),
+        ('absence_alert', 'Alerte absence'),
+        ('absence_auto', 'Absence automatique'),
         ('evaluation', 'Nouvelle évaluation'),
         ('training', 'Nouvelle formation'),
         ('document', 'Nouveau document RH'),

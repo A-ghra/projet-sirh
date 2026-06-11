@@ -1,48 +1,74 @@
-const LOGIN_ERROR_MESSAGE = "Nom d'utilisateur ou mot de passe incorrect.";
+const LOGIN_ERROR_MESSAGE = "Identifiant ou mot de passe incorrect.";
 
 let _loginInProgress = false;
+
+const OTOMIA_LOGIN_API = "http://127.0.0.1:8000/api";
 
 function getApiBase() {
     return typeof otomiaGetApiBase === "function"
         ? otomiaGetApiBase()
-        : (window.OTOMIA_API_BASE || `http://${location.hostname || "127.0.0.1"}:8000/api`);
+        : (window.OTOMIA_API_BASE || OTOMIA_LOGIN_API);
 }
 
-/**
- * Login direct — pas de verifySession, CSRF best-effort uniquement.
- */
-async function apiLogin(username, password) {
-    const api = getApiBase();
-    const csrf = typeof otomiaTryCsrf === "function" ? await otomiaTryCsrf() : "";
+function logErr(context, err) {
+    if (typeof otomiaLogError === "function") otomiaLogError(context, err);
+    else console.error("[OTOMIA ERROR]", context, err);
+}
 
+async function apiLogin(username, password) {
+    console.log("[LOGIN REQUEST]", username, getApiBase());
     let response;
     try {
-        response = await fetch(`${api}/login/`, {
-            method: "POST",
-            credentials: "include",
-            headers: {
-                "Content-Type": "application/json",
-                ...(csrf ? { "X-CSRFToken": csrf } : {}),
-            },
-            body: JSON.stringify({ username, password }),
-        });
+        if (typeof otomiaApiFetch === "function") {
+            response = await otomiaApiFetch("/login/", {
+                method: "POST",
+                body: { username, password },
+            });
+        } else {
+            const api = getApiBase();
+            const csrf = typeof otomiaTryCsrf === "function" ? await otomiaTryCsrf() : "";
+            const loginUrl = `${api}/login/`;
+            console.log("[OTOMIA FETCH]", "POST", loginUrl);
+            response = await fetch(loginUrl, {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    Accept: "application/json",
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
+                    ...(csrf ? { "X-CSRFToken": csrf } : {}),
+                },
+                body: JSON.stringify({ username, password }),
+            });
+            console.log("[OTOMIA FETCH]", "POST", loginUrl, "→", response.status);
+        }
     } catch (err) {
-        throw typeof otomiaFormatFetchError === "function"
+        logErr("apiLogin fetch", err);
+        const isNet = typeof otomiaIsNetworkFetchError === "function"
+            ? otomiaIsNetworkFetchError(err)
+            : true;
+        const net = typeof otomiaFormatFetchError === "function"
             ? otomiaFormatFetchError(err)
-            : err;
+            : new Error(`Connexion impossible vers ${OTOMIA_LOGIN_API}. Démarrez Django : python manage.py runserver 127.0.0.1:8000`);
+        net.isNetwork = isNet;
+        throw net;
     }
 
-    const data = await response.json().catch(() => ({}));
+    console.log("[LOGIN RESPONSE]", response.status, response.statusText);
 
-    if (response.status === 403 && !csrf) {
-        throw typeof otomiaFormatFetchError === "function"
-            ? otomiaFormatFetchError(new Error("csrf"), "csrf")
-            : new Error("Accès refusé (CSRF). Rechargez la page et réessayez.");
-    }
+    const data = typeof otomiaParseResponseBody === "function"
+        ? await otomiaParseResponseBody(response)
+        : {};
+    console.log("[LOGIN RESPONSE BODY]", data);
 
     if (!response.ok) {
-        const err = new Error(data.error || LOGIN_ERROR_MESSAGE);
+        const msg = typeof otomiaApiErrorMessage === "function"
+            ? otomiaApiErrorMessage(data, response.status)
+            : (data?.error || LOGIN_ERROR_MESSAGE);
+        const err = new Error(msg === `Erreur API ${response.status}` ? LOGIN_ERROR_MESSAGE : msg);
         err.status = response.status;
+        err.isNetwork = false;
+        logErr(`apiLogin HTTP ${response.status}`, err);
         throw err;
     }
 
@@ -50,69 +76,70 @@ async function apiLogin(username, password) {
     return data;
 }
 
-/** Redirection immédiate avec les données du login (sans /me/ obligatoire). */
 function completeLogin(loginPayload) {
     if (typeof otomiaCancelAuthCheck === "function") otomiaCancelAuthCheck();
 
     const user = loginPayload?.user;
-    if (!user) throw new Error("Réponse login invalide (utilisateur manquant).");
+    if (!user) {
+        const err = new Error(LOGIN_ERROR_MESSAGE);
+        logErr("completeLogin sans user", err);
+        throw err;
+    }
 
     if (typeof otomiaPersistUser === "function") {
         otomiaPersistUser(user);
     } else {
         sessionStorage.setItem("otomia_user", JSON.stringify(user));
     }
+    sessionStorage.setItem("otomia_fresh_login", "1");
 
     if (typeof otomiaLog === "function") {
-        otomiaLog("Connexion OK", user.username, user.role, user.dashboard);
+        otomiaLog("Connexion OK → tableau de bord", user.role);
     }
 
     const target = typeof otomiaAppEntryUrl === "function"
-        ? otomiaAppEntryUrl(user)
-        : "index.html";
+        ? otomiaAppEntryUrl()
+        : "index.html?module=dashboard";
 
+    console.log("[LOGIN REDIRECT]", target);
     window.location.replace(target);
 }
 
 async function applyLoginBranding() {
     try {
-        const host = window.OTOMIA_API_HOST || getApiBase().replace(/\/api\/?$/, "");
-        const r = await fetch(`${host}/api/public-branding/`, { credentials: "include" });
+        const api = getApiBase();
+        const brandingUrl = `${api}/public-branding/`;
+        console.log("[OTOMIA FETCH]", "GET", brandingUrl);
+        const r = await fetch(brandingUrl, {
+            credentials: "include",
+            headers: { Accept: "application/json" },
+        });
+        console.log("[OTOMIA FETCH]", "GET", brandingUrl, "→", r.status);
         if (!r.ok) return;
-        const b = await r.json();
+        const b = typeof otomiaParseResponseBody === "function"
+            ? await otomiaParseResponseBody(r)
+            : null;
+        if (!b || b.error) return;
         const logoBox = document.querySelector(".logo-box");
         if (logoBox && b.logo_display_url) {
+            const host = window.OTOMIA_API_HOST || "http://127.0.0.1:8000";
             const src = b.logo_display_url.startsWith("http") ? b.logo_display_url : `${host}${b.logo_display_url}`;
-            const icon = logoBox.querySelector("i");
-            if (icon) {
-                const img = document.createElement("img");
-                img.src = src;
-                img.style.cssText = "width:48px;height:48px;object-fit:contain;border-radius:6px;";
-                icon.replaceWith(img);
+            if (!logoBox.querySelector("img")) {
+                const icon = logoBox.querySelector("i");
+                if (icon?.parentNode) {
+                    const img = document.createElement("img");
+                    img.src = src;
+                    img.style.cssText = "width:48px;height:48px;object-fit:contain;border-radius:6px;";
+                    try { icon.replaceWith(img); } catch (e) { logErr("login logo replace", e); }
+                }
             }
         }
         const h1 = document.querySelector(".login-brand h1");
         const slogan = document.querySelector(".login-brand p");
         if (h1 && b.company_acronym) h1.textContent = b.company_acronym;
         if (slogan && b.company_slogan) slogan.textContent = b.company_slogan;
-    } catch (e) { /* non bloquant */ }
-}
-
-function showApiWarning(message) {
-    const el = document.getElementById("api-status");
-    if (!el) return;
-    el.textContent = message;
-    el.hidden = false;
-}
-
-/** Warning seulement — ne bloque jamais le login */
-async function checkApiOnLoad() {
-    if (typeof otomiaCheckApiReachable !== "function") return;
-    const status = await otomiaCheckApiReachable();
-    if (!status.ok && status.warn) {
-        showApiWarning("Avertissement : " + status.message);
-    } else if (status.ok && typeof otomiaLog === "function") {
-        otomiaLog("API joignable", status.api);
+    } catch (e) {
+        logErr("applyLoginBranding", e);
     }
 }
 
@@ -128,35 +155,49 @@ function checkExistingSession() {
         : new AbortController();
 
     const api = getApiBase();
-    fetch(`${api}/me/`, {
+    const meUrl = `${api}/me/`;
+    console.log("[OTOMIA FETCH]", "GET", meUrl, "(session check)");
+    fetch(meUrl, {
         credentials: "include",
         cache: "no-store",
         signal: controller.signal,
+        headers: {
+            Accept: "application/json",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+        },
     })
         .then(async (r) => {
+            console.log("[OTOMIA FETCH]", "GET", meUrl, "→", r.status);
             if (_loginInProgress) return;
             if (r.status === 401) {
                 sessionStorage.removeItem("otomia_user");
                 return;
             }
             if (!r.ok) return;
-            const me = await r.json();
+            const me = typeof otomiaParseResponseBody === "function"
+                ? await otomiaParseResponseBody(r)
+                : null;
+            if (!me || me.error) return;
             if (_loginInProgress) return;
             if (typeof otomiaPersistUser === "function") otomiaPersistUser(me);
             const target = typeof otomiaAppEntryUrl === "function"
-                ? otomiaAppEntryUrl(me)
-                : "index.html";
+                ? otomiaAppEntryUrl()
+                : "index.html?module=dashboard";
             window.location.replace(target);
         })
-        .catch((err) => {
-            if (err.name === "AbortError" || _loginInProgress) return;
-            /* erreur réseau : ne pas effacer la session */
+        .catch((e) => {
+            if (e?.name === "AbortError") {
+                console.log("[OTOMIA] Session check annulée (login en cours)");
+                return;
+            }
+            logErr("checkExistingSession /me/", e);
         });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    console.log("[LOGIN PAGE]", "origin:", window.location.origin, "| API:", window.OTOMIA_API_BASE);
     applyLoginBranding();
-    checkApiOnLoad();
 
     const form = document.getElementById("login-form");
     const errorEl = document.getElementById("login-error");
@@ -178,7 +219,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (typeof otomiaIsHttpContext === "function" && !otomiaIsHttpContext()) {
-            errorEl.textContent = "Utilisez http://127.0.0.1:5500/login.html (pas file://).";
+            errorEl.textContent = "Accès non autorisé depuis un fichier local. Contactez l'administrateur.";
             errorEl.hidden = false;
             return;
         }
@@ -194,13 +235,12 @@ document.addEventListener("DOMContentLoaded", () => {
             completeLogin(result);
         } catch (err) {
             _loginInProgress = false;
-            const isAuth = err.status === 401
-                || /incorrect|mot de passe|invalid/i.test(err.message || "");
-            errorEl.textContent = isAuth
-                ? (err.message || LOGIN_ERROR_MESSAGE)
-                : (err.message || "Erreur de connexion.");
+            logErr("login form submit", err);
+            errorEl.textContent = err.isNetwork
+                ? err.message
+                : (err.message || LOGIN_ERROR_MESSAGE);
             errorEl.hidden = false;
-            if (typeof otomiaLog === "function") otomiaLog("Erreur login", err);
+            if (typeof otomiaLog === "function") otomiaLog("Login échoué", err.status || err.message);
         } finally {
             if (!_loginInProgress) {
                 btn.disabled = false;

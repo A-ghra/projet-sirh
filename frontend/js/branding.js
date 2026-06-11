@@ -18,17 +18,27 @@ const OTOMIA_BRANDING = {
 
 async function loadOtomiaBranding() {
     try {
-        const host = window.OTOMIA_API_HOST
-            || (window.OTOMIA_API_BASE || window.OTOMIA_API_URL || `${location.protocol}//${location.hostname}:8000/api`).replace(/\/api\/?$/, "");
-        const r = await fetch(`${host}/api/public-branding/`);
-        const b = await r.json();
+        const api = (typeof otomiaGetApiBase === "function" ? otomiaGetApiBase() : null)
+            || window.OTOMIA_API_BASE
+            || "http://127.0.0.1:8000/api";
+        const host = window.OTOMIA_API_HOST || "http://127.0.0.1:8000";
+        const r = await fetch(`${api}/public-branding/`, {
+            credentials: "include",
+            headers: { Accept: "application/json" },
+        });
+        const b = typeof otomiaParseResponseBody === "function"
+            ? await otomiaParseResponseBody(r)
+            : null;
+        if (!b || b.error) return;
         OTOMIA_BRANDING.developerName = b.developer_name || OTOMIA_BRANDING.developerName;
         OTOMIA_BRANDING.developerWebsite = b.developer_website || "";
         OTOMIA_BRANDING.developerSignature = b.developer_signature || OTOMIA_BRANDING.developerSignature;
         OTOMIA_BRANDING.appVersion = b.app_version || OTOMIA_BRANDING.appVersion;
         OTOMIA_BRANDING.copyrightYear = b.copyright_year || OTOMIA_BRANDING.copyrightYear;
         if (b.developer_solutions?.length) OTOMIA_BRANDING.solutions = b.developer_solutions;
-    } catch (e) { /* valeurs par défaut */ }
+    } catch (e) {
+        if (typeof otomiaLogError === "function") otomiaLogError("loadOtomiaBranding", e);
+    }
 }
 
 function otomiaGroupLinkHtml(className = "otomia-group-link") {
@@ -80,9 +90,7 @@ window.closeAboutModal = () => {
 function initDeveloperFooters() {
     document.querySelectorAll(".otomia-developer-signature").forEach((el) => {
         const link = otomiaGroupLinkHtml();
-        if (el.dataset.format === "login") {
-            el.innerHTML = `Conçu et développé par ${link} &copy; ${OTOMIA_BRANDING.copyrightYear}`;
-        } else if (el.dataset.format === "app") {
+        if (el.dataset.format === "login" || el.dataset.format === "app") {
             el.innerHTML = `&copy; ${OTOMIA_BRANDING.copyrightYear} OTOMIA RH | Développé par ${link}`;
         } else {
             el.innerHTML = `${OTOMIA_BRANDING.developerSignature.replace(OTOMIA_BRANDING.developerName, link)}`;

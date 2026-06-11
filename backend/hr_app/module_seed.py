@@ -106,10 +106,12 @@ LEAVE_TYPES = [
 ]
 
 PRESENCE_TABS = [
+    ('onglet_pointage', 'Pointage', 'fa-fingerprint', 'Enregistrement manuel des événements de présence'),
+    ('onglet_recap', 'Récapitulatif', 'fa-chart-pie', 'Synthèse mensuelle des présences et absences'),
+    ('onglet_presences', 'Présences', 'fa-clock', 'Rapport général des présences enregistrées'),
+    ('onglet_grille', 'Grille de présence', 'fa-table', 'Grille mensuelle imprimable P/A/C/M'),
     ('onglet_conges', 'Congés', 'fa-umbrella-beach', 'Gestion des demandes de congés'),
-    ('onglet_presences', 'Présences', 'fa-clock', 'Suivi des présences quotidiennes'),
     ('onglet_missions', 'Missions', 'fa-briefcase', 'Missions et déplacements'),
-    ('onglet_types', 'Types de congés', 'fa-list', 'Configuration des types de congés'),
 ]
 
 PERFORMANCE_KPIS = [

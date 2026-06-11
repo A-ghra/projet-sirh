@@ -3,7 +3,9 @@ import calendar
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from .models import WorkScheduleSettings
+from django.db.models import Q
+
+from .models import WorkScheduleSettings, PresenceAbsenceSettings
 
 D = Decimal
 
@@ -52,12 +54,32 @@ def _leave_days_by_type(employee, month_date):
     return paid, unpaid
 
 
+def _auto_absence_counts_toward_payroll(att):
+    """Détermine si une absence auto doit impacter la paie."""
+    if att.record_source != 'auto':
+        return True
+    wf = att.absence_workflow_status
+    if wf == 'regularized':
+        return False
+    rule = PresenceAbsenceSettings.get_settings().payroll_impact_rule
+    if rule == 'no_impact':
+        return False
+    if rule == 'justified' and wf in ('confirmed', 'contested'):
+        return False
+    return True
+
+
 def _attendance_metrics(employee, month_date, schedule):
     start, end = _month_bounds(month_date)
     qs = employee.attendances.filter(date__gte=start, date__lte=end)
     late_count = qs.filter(status='Late').count()
-    absent_count = qs.filter(status='Absent').count()
-    present_count = qs.filter(status='Present').count()
+    absent_count = 0
+    for att in qs.filter(Q(status='Absent') | Q(event_type='absence')):
+        if _auto_absence_counts_toward_payroll(att):
+            absent_count += 1
+    present_count = qs.filter(
+        Q(event_type='presence') | Q(status__in=['Present', 'Late'])
+    ).exclude(event_type__in=['absence', 'leave']).count()
 
     late_minutes = 0
     hours_worked = D('0')

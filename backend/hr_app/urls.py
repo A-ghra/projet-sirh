@@ -18,7 +18,8 @@ from .views import (
     AppModuleViewSet, ModuleFeatureViewSet, CustomFieldViewSet, module_config_view,
 )
 from .settings_views import (
-    public_branding_view, system_settings_view, work_schedule_settings_view, RoleManagementViewSet,
+    public_branding_view, system_settings_view, work_schedule_settings_view,
+    presence_absence_settings_view, RoleManagementViewSet,
     ManagedUserViewSet, SystemBackupViewSet, all_custom_fields_view,
 )
 
@@ -85,6 +86,7 @@ urlpatterns = [
     path('public-branding/', public_branding_view),
     path('system-settings/', system_settings_view),
     path('work-schedule-settings/', work_schedule_settings_view),
+    path('presence-absence-settings/', presence_absence_settings_view),
     path('settings/custom-fields/', all_custom_fields_view),
     path('', include(router.urls)),
 ]

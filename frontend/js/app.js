@@ -1,11 +1,18 @@
-const API_BASE_URL = window.OTOMIA_API_BASE
-    || window.OTOMIA_API_URL
-    || `${location.protocol}//${location.hostname}:8000/api`;
-const API_HOST = window.OTOMIA_API_HOST || API_BASE_URL.replace(/\/api\/?$/, "");
+const OTOMIA_API_URL = "http://127.0.0.1:8000/api";
+const OTOMIA_HOST_URL = "http://127.0.0.1:8000";
+
+function getApiBaseUrl() {
+    return (typeof otomiaGetApiBase === "function" ? otomiaGetApiBase() : null)
+        || window.OTOMIA_API_BASE
+        || OTOMIA_API_URL;
+}
+function getApiHost() {
+    return window.OTOMIA_API_HOST || OTOMIA_HOST_URL;
+}
+window.getApiBaseUrl = getApiBaseUrl;
+window.getApiHost = getApiHost;
 let currentUser = null;
 let contentArea = null;
-let deptChart = null;
-let genderChart = null;
 let moduleConfig = null;
 let customizationModules = [];
 let selectedCustomizationModuleId = null;
@@ -158,10 +165,15 @@ async function ensureCsrf() {
         return window.otomiaTryCsrf();
     }
     try {
-        const r = await fetch(`${API_BASE_URL}/csrf/`, { credentials: "include" });
+        const r = await fetch(`${getApiBaseUrl()}/csrf/`, {
+            credentials: "include",
+            headers: { Accept: "application/json" },
+        });
         if (!r.ok) return "";
-        const data = await r.json();
-        return data.csrfToken || "";
+        const data = typeof otomiaParseResponseBody === "function"
+            ? await otomiaParseResponseBody(r)
+            : null;
+        return data?.csrfToken || "";
     } catch (e) {
         return "";
     }
@@ -184,14 +196,12 @@ async function apiFetch(path, options = {}) {
             else window.location.replace("login.html");
             throw new Error("Session expirée");
         }
-        const data = response.headers.get("content-type")?.includes("json")
-            ? await response.json()
-            : null;
-        if (!response.ok) throw new Error(data?.error || data?.detail || `Erreur ${response.status}`);
-        return data;
+        return typeof otomiaHandleApiResponse === "function"
+            ? otomiaHandleApiResponse(response, `apiFetch ${path}`)
+            : response;
     }
 
-    const headers = { ...(options.headers || {}) };
+    const headers = { ...(options.headers || {}), Accept: "application/json" };
     if (options.body && !headers["Content-Type"]) {
         headers["Content-Type"] = "application/json";
     }
@@ -201,7 +211,7 @@ async function apiFetch(path, options = {}) {
     const method = (options.method || "GET").toUpperCase();
     let response;
     try {
-        response = await fetch(`${API_BASE_URL}${path}`, {
+        response = await fetch(`${getApiBaseUrl()}${path}`, {
             credentials: "include",
             cache: method === "GET" ? "no-store" : options.cache,
             ...options,
@@ -219,15 +229,16 @@ async function apiFetch(path, options = {}) {
         else window.location.replace("login.html");
         throw new Error("Session expirée");
     }
-    const data = response.headers.get("content-type")?.includes("json")
-        ? await response.json()
-        : null;
-    if (!response.ok) throw new Error(data?.error || data?.detail || `Erreur ${response.status}`);
-    return data;
+    if (typeof otomiaHandleApiResponse === "function") {
+        return otomiaHandleApiResponse(response, `apiFetch ${path}`);
+    }
+    const data = await response.text();
+    if (!response.ok) throw new Error(`Erreur ${response.status}`);
+    try { return JSON.parse(data); } catch (e) { return { raw: data }; }
 }
 
 const apiGet = (path) => apiFetch(path, { cache: "no-store" });
-const apiPost = (path, data) => apiFetch(path, { method: "POST", body: JSON.stringify(data) });
+const apiPost = (path, data) => apiFetch(path, { method: "POST", body: data });
 
 /** Télécharge un blob via fetch (contourne les limites cross-origin du attribut download). */
 async function downloadBlobFromResponse(response, fallbackName) {
@@ -249,7 +260,7 @@ async function downloadBlobFromResponse(response, fallbackName) {
 /** Fallback : ouvre l'URL de téléchargement (session cookie envoyé par le navigateur). */
 function openIndividualDownloadUrl(employeeId, month, year, format = "pdf") {
     const qs = `employee_id=${encodeURIComponent(employeeId)}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}&export_format=${encodeURIComponent(format)}`;
-    const url = `${API_BASE_URL}/payroll/export-individual/download/?${qs}`;
+    const url = `${getApiBaseUrl()}/payroll/export-individual/download/?${qs}`;
     const link = document.createElement("a");
     link.href = url;
     link.target = "_blank";
@@ -263,7 +274,7 @@ function openIndividualDownloadUrl(employeeId, month, year, format = "pdf") {
 async function downloadIndividualPayslip(employeeId, month, year, format = "pdf") {
     console.debug("[OTOMIA] Export individuel download", { employeeId, month, year, format });
     const qs = `employee_id=${encodeURIComponent(employeeId)}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}&export_format=${encodeURIComponent(format)}`;
-    const response = await fetch(`${API_BASE_URL}/payroll/export-individual/download/?${qs}`, {
+    const response = await fetch(`${getApiBaseUrl()}/payroll/export-individual/download/?${qs}`, {
         credentials: "include",
     });
     if (response.status === 401) {
@@ -274,8 +285,12 @@ async function downloadIndividualPayslip(employeeId, month, year, format = "pdf"
         throw new Error("Session expirée — reconnectez-vous.");
     }
     if (!response.ok) {
-        const err = response.headers.get("content-type")?.includes("json") ? await response.json() : null;
-        const msg = err?.error || err?.detail || `Erreur export (${response.status})`;
+        const err = typeof otomiaParseResponseBody === "function"
+            ? await otomiaParseResponseBody(response)
+            : null;
+        const msg = typeof otomiaApiErrorMessage === "function"
+            ? otomiaApiErrorMessage(err, response.status)
+            : (err?.error || `Erreur export (${response.status})`);
         if (response.status === 403) throw new Error(msg || "Accès refusé — rôle insuffisant pour l'export individuel.");
         throw new Error(msg);
     }
@@ -292,19 +307,26 @@ async function downloadIndividualPayslip(employeeId, month, year, format = "pdf"
         return `BULLETIN_PAIE.${ext}`;
     }
 }
-const apiPut = (path, data) => apiFetch(path, { method: "PUT", body: JSON.stringify(data) });
+const apiPut = (path, data) => apiFetch(path, { method: "PUT", body: data });
 const apiDelete = (path) => apiFetch(path, { method: "DELETE" });
 
 async function apiFormPost(path, formData) {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
         method: "POST",
         credentials: "include",
-        headers: { "X-CSRFToken": await getCsrfToken() },
+        headers: {
+            "X-CSRFToken": await getCsrfToken(),
+            Accept: "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
         body: formData,
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
-    return data;
+    if (typeof otomiaHandleApiResponse === "function") {
+        return otomiaHandleApiResponse(response, `apiFormPost ${path}`);
+    }
+    const data = await response.text();
+    if (!response.ok) throw new Error(`Erreur ${response.status}`);
+    try { return JSON.parse(data); } catch (e) { return { raw: data }; }
 }
 
 async function applyCompanyBranding() {
@@ -317,13 +339,16 @@ async function applyCompanyBranding() {
             el.textContent = c.company_slogan || "";
         });
         if (c.logo_display_url) {
-            const logoUrl = c.logo_display_url.startsWith("http") ? c.logo_display_url : `${API_HOST}${c.logo_display_url}`;
-            document.querySelectorAll(".sidebar-header .brand-logo i").forEach((icon) => {
+            const logoUrl = c.logo_display_url.startsWith("http") ? c.logo_display_url : `${getApiHost()}${c.logo_display_url}`;
+            document.querySelectorAll(".sidebar-header .brand-logo").forEach((box) => {
+                if (box.querySelector("img")) return;
+                const icon = box.querySelector("i");
+                if (!icon || !icon.parentNode) return;
                 const img = document.createElement("img");
                 img.src = logoUrl;
                 img.style.cssText = "width:36px;height:36px;object-fit:contain;border-radius:4px;";
                 img.alt = "Logo";
-                icon.replaceWith(img);
+                try { icon.replaceWith(img); } catch (e) { console.warn("[OTOMIA] Logo sidebar:", e.message); }
             });
         }
     } catch (e) { /* ignore */ }
@@ -344,10 +369,81 @@ function formatMoney(v, currency = "USD") {
     return `${Number(v).toLocaleString("fr-FR")} ${sym}`;
 }
 
+/** Insertion DOM sécurisée — évite Node.insertBefore sur parent incorrect */
+function safeInsertBefore(parent, node, referenceNode) {
+    if (!parent || !node) {
+        console.warn("[OTOMIA DOM] safeInsertBefore ignoré — parent ou node manquant", { parent, node });
+        return false;
+    }
+    if (referenceNode && referenceNode.parentNode === parent) {
+        parent.insertBefore(node, referenceNode);
+        return true;
+    }
+    if (referenceNode) {
+        console.warn("[OTOMIA DOM] safeInsertBefore fallback appendChild", {
+            parentTag: parent.tagName,
+            parentId: parent.id,
+            refTag: referenceNode.tagName,
+            refParent: referenceNode.parentNode?.tagName,
+            refParentId: referenceNode.parentNode?.id,
+        });
+    }
+    if (node.parentNode !== parent) parent.appendChild(node);
+    return true;
+}
+
+function showAppLoader(message = "Chargement...") {
+    if (!contentArea) contentArea = document.getElementById("content-area");
+    if (contentArea) {
+        contentArea.innerHTML = `<div class="loader"><i class="fas fa-spinner fa-spin"></i> ${message}</div>`;
+    }
+}
+
+window.classifyInitError = function classifyInitError(err) {
+    const msg = err?.message || String(err);
+    if (typeof otomiaIsNetworkFetchError === "function" && otomiaIsNetworkFetchError(err)) {
+        return "Le serveur OTOMIA RH n'est pas accessible. Démarrez Django : python manage.py runserver 127.0.0.1:8000";
+    }
+    if (/failed to fetch|connexion impossible|networkerror/i.test(msg)) {
+        return "Impossible de récupérer les données du tableau de bord. Vérifiez la connexion au serveur.";
+    }
+    if (err?.status === 401 || msg === "Session expirée" || msg === "Non authentifié") {
+        return "Votre session a expiré. Veuillez vous reconnecter.";
+    }
+    if (err?.status === 404) {
+        return "Impossible de récupérer les données du tableau de bord. Endpoint API introuvable.";
+    }
+    if (err?.status >= 500) {
+        return "Erreur serveur lors du chargement. Consultez les logs Django.";
+    }
+    if (/insertBefore|removeChild|not a child/i.test(msg)) {
+        return "Erreur d'affichage de l'interface. Réessayez ou rechargez la page.";
+    }
+    return msg;
+};
+
+function showInitError(err, context = "Init") {
+    if (typeof otomiaLogError === "function") otomiaLogError(`OTOMIA ${context}`, err);
+    else console.error(`OTOMIA ${context}:`, err);
+    if (!contentArea) contentArea = document.getElementById("content-area");
+    if (!contentArea) return;
+    const userMsg = classifyInitError(err);
+    contentArea.innerHTML = `<div class="panel"><h2>Impossible de charger la page demandée</h2>
+        <p class="error-message">${userMsg}</p>
+        <p class="hint-text">API : <strong>${getApiHost()}</strong></p>
+        <button class="btn btn-primary" onclick="location.reload()">Réessayer</button>
+        <button class="btn btn-secondary" onclick="loadModule('dashboard')">Ouvrir le tableau de bord</button>
+        <button class="btn btn-secondary" onclick="otomiaLogout()">Retour connexion</button></div>`;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
     if (typeof otomiaLog === "function") {
         otomiaLog("Chargement app", window.location.href, "| root:", window.OTOMIA_APP_ROOT);
     }
+
+    contentArea = document.getElementById("content-area");
+    const freshLogin = sessionStorage.getItem("otomia_fresh_login");
+    showAppLoader(freshLogin ? "Connexion réussie — chargement du tableau de bord..." : "Vérification de la session...");
 
     const redirectToLogin = (reason) => {
         sessionStorage.removeItem("otomia_user");
@@ -385,46 +481,44 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
     }
 
-    contentArea = document.getElementById("content-area");
+    try { setupUI(); } catch (e) {
+        if (typeof otomiaLogError === "function") otomiaLogError("setupUI", e);
+    }
+    try { await loadModuleConfig(); } catch (e) {
+        if (typeof otomiaLogError === "function") otomiaLogError("loadModuleConfig", e);
+    }
+    try { await applyCompanyBranding(); } catch (e) {
+        if (typeof otomiaLogError === "function") otomiaLogError("applyCompanyBranding", e);
+    }
+    try { applyRoleMenu(); } catch (e) {
+        if (typeof otomiaLogError === "function") otomiaLogError("applyRoleMenu", e);
+    }
+
     try {
-        setupUI();
-        await loadModuleConfig();
-        applyCompanyBranding();
-        applyRoleMenu();
-        loadHomeModule();
+        const homeModule = getHomeModule();
+        loadHomeModule(homeModule);
+        sessionStorage.removeItem("otomia_fresh_login");
+        if (window.location.search) {
+            window.history.replaceState({}, "", window.location.pathname);
+        }
         if (typeof otomiaLog === "function") {
-            otomiaLog("Module d'accueil chargé", getHomeModule(), "pour", currentUser.role);
+            otomiaLog("Module initial chargé:", homeModule, "| rôle:", currentUser.role);
         }
     } catch (err) {
-        console.error("Init OTOMIA RH:", err);
-        contentArea.innerHTML = `<div class="panel"><h2>Impossible de charger la page demandée</h2>
-            <p class="error-message">${err.message || err}</p>
-            <p>Vérifiez que le backend Django tourne sur <strong>${API_HOST}</strong>.</p>
-            <button class="btn btn-primary" onclick="otomiaLogout()">Retour connexion</button></div>`;
+        showInitError(err, "chargement module");
     }
 });
 
-function resolveHomeModuleKey(moduleKey) {
-    if (!moduleKey) return null;
-    if (moduleKey === "dashboard") return canAccessDashboard() ? "dashboard" : null;
-    return canAccessModule(moduleKey, "read") ? moduleKey : null;
-}
-
 function getHomeModule() {
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get("module");
-    const fromUrlResolved = resolveHomeModuleKey(fromUrl);
-    if (fromUrlResolved) return fromUrlResolved;
-
-    const fromDashboard = typeof otomiaDashboardModule === "function"
-        ? otomiaDashboardModule(currentUser)
-        : null;
-    const fromDashboardResolved = resolveHomeModuleKey(fromDashboard);
-    if (fromDashboardResolved) return fromDashboardResolved;
-
+    const urlMod = new URLSearchParams(window.location.search).get("module");
+    if (urlMod) {
+        const allowed = urlMod === "dashboard"
+            ? canAccessDashboard()
+            : (urlMod === "parametres" || canAccessModule(urlMod, "read"));
+        if (allowed) return urlMod;
+    }
     if (canAccessDashboard()) return "dashboard";
-    if (canAccessModule("portail-employe", "read")) return "portail-employe";
-    const firstVisible = [...document.querySelectorAll(".sidebar-nav li[data-target]")]
+    const firstVisible = [...document.querySelectorAll("#nav-menu li[data-target]")]
         .find((item) => item.style.display !== "none" && canAccessModule(item.dataset.target, "read"));
     return firstVisible?.dataset?.target || "dashboard";
 }
@@ -435,41 +529,53 @@ function activateSidebarModule(moduleKey) {
     });
 }
 
-function loadHomeModule() {
-    const home = getHomeModule();
+function loadHomeModule(moduleName) {
+    const home = moduleName || getHomeModule();
     activateSidebarModule(home);
     loadModule(home);
 }
 
 function setupUI() {
-    document.getElementById("user-name").textContent = currentUser.employee_name || currentUser.username;
-    document.getElementById("user-role").textContent = currentUser.role_label;
-    document.getElementById("user-avatar").src =
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.username)}&background=1a5f9e&color=fff`;
+    const userName = document.getElementById("user-name");
+    const userRole = document.getElementById("user-role");
+    const userAvatar = document.getElementById("user-avatar");
+    if (userName) userName.textContent = currentUser.employee_name || currentUser.username;
+    if (userRole) userRole.textContent = currentUser.role_label || currentUser.role;
+    if (userAvatar) {
+        userAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.username)}&background=1a5f9e&color=fff`;
+    }
 
     const sidebar = document.getElementById("sidebar");
     const toggleBtn = document.getElementById("toggle-sidebar");
     const mainContent = document.querySelector(".main-content");
-    toggleBtn.addEventListener("click", () => {
-        if (window.innerWidth <= 768) sidebar.classList.toggle("active");
-        else { sidebar.classList.toggle("collapsed"); mainContent.classList.toggle("expanded"); }
-    });
+    if (toggleBtn && sidebar) {
+        toggleBtn.addEventListener("click", () => {
+            if (window.innerWidth <= 768) sidebar.classList.toggle("active");
+            else {
+                sidebar.classList.toggle("collapsed");
+                if (mainContent) mainContent.classList.toggle("expanded");
+            }
+        });
+    }
 
-    document.querySelectorAll(".sidebar-nav li[data-target]").forEach((item) => {
+    document.querySelectorAll("#nav-menu li[data-target]").forEach((item) => {
         item.addEventListener("click", () => {
             loadModule(item.getAttribute("data-target"));
-            if (window.innerWidth <= 768) sidebar.classList.remove("active");
+            if (window.innerWidth <= 768 && sidebar) sidebar.classList.remove("active");
         });
     });
 
-    document.getElementById("logout-btn").addEventListener("click", async () => {
-        try { await apiPost("/logout/", {}); } catch (e) { /* ignore */ }
-        if (typeof otomiaLogout === "function") otomiaLogout();
-        else {
-            sessionStorage.removeItem("otomia_user");
-            window.location.replace("login.html");
-        }
-    });
+    const logoutBtn = document.getElementById("logout-btn");
+    if (logoutBtn) {
+        logoutBtn.addEventListener("click", async () => {
+            try { await apiPost("/logout/", {}); } catch (e) { /* ignore */ }
+            if (typeof otomiaLogout === "function") otomiaLogout();
+            else {
+                sessionStorage.removeItem("otomia_user");
+                window.location.replace("login.html");
+            }
+        });
+    }
 }
 
 function applyRoleMenu() {
@@ -487,60 +593,93 @@ function applyRoleMenu() {
         }
     });
     if (moduleConfig?.modules?.length) {
-        const nav = document.querySelector(".sidebar-nav");
-        const items = [...nav.querySelectorAll("li[data-target]")];
+        const navMenu = document.getElementById("nav-menu");
+        const logoutBtn = document.getElementById("logout-btn");
+        if (!navMenu || !logoutBtn) {
+            console.warn("[OTOMIA] applyRoleMenu — #nav-menu ou #logout-btn introuvable");
+            return;
+        }
+        const items = [...navMenu.querySelectorAll("li[data-target]")];
         const orderMap = Object.fromEntries(moduleConfig.modules.map((m) => [m.key, m.display_order]));
         items.sort((a, b) => (orderMap[a.dataset.target] ?? 99) - (orderMap[b.dataset.target] ?? 99));
-        items.forEach((el) => nav.insertBefore(el, document.getElementById("logout-btn")));
+        items.forEach((el) => {
+            if (el === logoutBtn) return;
+            safeInsertBefore(navMenu, el, logoutBtn);
+        });
     }
 }
 
 function loadModule(name, options = {}) {
+    if (!contentArea) contentArea = document.getElementById("content-area");
+    if (!contentArea) return;
+
+    if (name !== "dashboard" && document.getElementById("chart-headcount") && typeof destroyDashboardCharts === "function") {
+        destroyDashboardCharts();
+    }
+    if (name !== "reporting" && reportCharts.length) {
+        destroyReportCharts();
+    }
     const allowed = name === "dashboard" ? canAccessDashboard() : canAccessModule(name, "read");
     if (name !== "parametres" && !allowed) {
         contentArea.innerHTML = `<p class="error-message">Accès non autorisé à ce module.</p>`;
         return;
     }
     activateSidebarModule(name);
-    if (!options.skipLoader) {
-        contentArea.innerHTML = `<div class="loader"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>`;
+    if (!options.skipLoader && name !== "reporting") {
+        showAppLoader("Chargement du module...");
     }
     const modules = {
         dashboard: renderDashboard,
         "admin-personnel": renderAdminPersonnel,
         paie: renderPaie,
-        presences: renderPresences,
+        presences: window.renderPresences,
         recrutement: renderRecrutement,
         formation: renderFormation,
         performances: renderPerformances,
         "portail-employe": renderPortailEmploye,
-        reporting: renderReporting,
+        reporting: window.renderReporting,
         parametres: renderParametres,
     };
-    (modules[name] || (() => { contentArea.innerHTML = "<p>Module introuvable.</p>"; }))();
+    const renderer = modules[name];
+    if (!renderer) {
+        contentArea.innerHTML = "<p>Module introuvable.</p>";
+        return;
+    }
+    Promise.resolve(renderer()).catch((err) => {
+        if (typeof otomiaLogError === "function") otomiaLogError(`loadModule ${name}`, err);
+        contentArea.innerHTML = `<div class="panel"><h2>Erreur de chargement</h2>
+            <p class="error-message">${err?.message || err}</p>
+            <button class="btn btn-primary" onclick="loadModule('${name}')">Réessayer</button></div>`;
+    });
     if (typeof otomiaStartPolling === "function") otomiaStartPolling(name);
 }
 
 // --- Dashboard ---
 const DASHBOARD_SECTIONS = {
     rh: {
-        title: "Ressources Humaines",
+        title: "Personnel",
         icon: "fa-users",
         cards: [
-            { id: "kpi-rh-total", label: "Effectif total", icon: "fa-users" },
-            { id: "kpi-rh-active", label: "Employés actifs", icon: "fa-user-check" },
-            { id: "kpi-rh-hires", label: "Recrutements ouverts", icon: "fa-user-plus" },
-            { id: "kpi-rh-contracts", label: "Contrats à échéance", icon: "fa-file-contract" },
+            { id: "kpi-rh-total", label: "Effectif total", icon: "fa-users", tip: "Nombre total d'employés actifs" },
+            { id: "kpi-rh-active", label: "Employés actifs", icon: "fa-user-check", tip: "Employés en statut actif" },
+            { id: "kpi-rh-new", label: "Nouveaux ce mois", icon: "fa-user-plus", tip: "Embauches du mois sélectionné" },
+            { id: "kpi-rh-contracts", label: "Contrats à échéance", icon: "fa-file-contract", tip: "Contrats expirant sous 60 jours" },
+            { id: "kpi-rh-gender", label: "Répartition H/F", icon: "fa-venus-mars", tip: "Hommes / Femmes / Autres" },
+            { id: "kpi-rh-turnover", label: "Taux de rotation", icon: "fa-exchange-alt", tip: "Rotation annuelle du personnel", suffix: "%" },
+            { id: "kpi-rh-seniority", label: "Ancienneté moyenne", icon: "fa-hourglass-half", tip: "Ancienneté moyenne en années", suffix: " ans" },
         ],
     },
     payroll: {
-        title: "Gestion de la Paie",
+        title: "Paie",
         icon: "fa-money-check-alt",
         cards: [
             { id: "kpi-pay-bulletins", label: "Bulletins générés", icon: "fa-file-invoice-dollar" },
-            { id: "kpi-pay-mass", label: "Masse salariale", icon: "fa-coins" },
+            { id: "kpi-pay-mass", label: "Masse salariale", icon: "fa-coins", format: "money" },
+            { id: "kpi-pay-evolution", label: "Évolution masse sal.", icon: "fa-chart-line", suffix: "%" },
+            { id: "kpi-pay-deductions", label: "Total retenues", icon: "fa-minus-circle", format: "money" },
+            { id: "kpi-pay-avg", label: "Coût moyen / employé", icon: "fa-calculator", format: "money" },
             { id: "kpi-pay-pending", label: "Paies en attente", icon: "fa-hourglass-half" },
-            { id: "kpi-pay-exports", label: "Exportations effectuées", icon: "fa-file-export" },
+            { id: "kpi-pay-exports", label: "Exportations", icon: "fa-file-export" },
         ],
     },
     presences: {
@@ -549,8 +688,11 @@ const DASHBOARD_SECTIONS = {
         cards: [
             { id: "kpi-pres-present", label: "Présences du jour", icon: "fa-user-check" },
             { id: "kpi-pres-absent", label: "Employés absents", icon: "fa-user-times" },
+            { id: "kpi-pres-late", label: "Retards", icon: "fa-clock" },
             { id: "kpi-pres-leaves", label: "Congés en cours", icon: "fa-umbrella-beach" },
-            { id: "kpi-pres-late", label: "Retards enregistrés", icon: "fa-clock" },
+            { id: "kpi-pres-rate", label: "Taux de présence", icon: "fa-percentage", suffix: "%" },
+            { id: "kpi-pres-abs-rate", label: "Taux d'absentéisme", icon: "fa-user-slash", suffix: "%" },
+            { id: "kpi-pres-avg-leave", label: "Jours congé moyen", icon: "fa-calendar-day" },
         ],
     },
     recruitment: {
@@ -561,6 +703,9 @@ const DASHBOARD_SECTIONS = {
             { id: "kpi-rec-interviews", label: "Entretiens programmés", icon: "fa-calendar-alt" },
             { id: "kpi-rec-accepted", label: "Candidats acceptés", icon: "fa-thumbs-up" },
             { id: "kpi-rec-rejected", label: "Candidats refusés", icon: "fa-thumbs-down" },
+            { id: "kpi-rec-open", label: "Postes ouverts", icon: "fa-briefcase" },
+            { id: "kpi-rec-conversion", label: "Taux de conversion", icon: "fa-funnel-dollar", suffix: "%" },
+            { id: "kpi-rec-delay", label: "Délai moyen recrut.", icon: "fa-stopwatch", suffix: " j" },
         ],
     },
     formation: {
@@ -571,6 +716,9 @@ const DASHBOARD_SECTIONS = {
             { id: "kpi-form-done", label: "Formations terminées", icon: "fa-certificate" },
             { id: "kpi-form-participants", label: "Participants inscrits", icon: "fa-users" },
             { id: "kpi-form-results", label: "Résultats enregistrés", icon: "fa-clipboard-check" },
+            { id: "kpi-form-rate", label: "Taux de réussite", icon: "fa-trophy", suffix: "%" },
+            { id: "kpi-form-hours", label: "Heures formation moy.", icon: "fa-clock" },
+            { id: "kpi-form-participation", label: "Taux de participation", icon: "fa-user-graduate", suffix: "%" },
         ],
     },
     performance: {
@@ -578,9 +726,11 @@ const DASHBOARD_SECTIONS = {
         icon: "fa-star",
         cards: [
             { id: "kpi-perf-reviews", label: "Évaluations réalisées", icon: "fa-star-half-alt" },
+            { id: "kpi-perf-avg", label: "Moyenne des notes", icon: "fa-percentage", suffix: "/100" },
             { id: "kpi-perf-objectives", label: "Objectifs atteints", icon: "fa-bullseye" },
+            { id: "kpi-perf-obj-rate", label: "Taux atteinte objectifs", icon: "fa-flag-checkered", suffix: "%" },
             { id: "kpi-perf-kpis", label: "KPI suivis", icon: "fa-chart-line" },
-            { id: "kpi-perf-avg", label: "Moyenne performances", icon: "fa-percentage" },
+            { id: "kpi-perf-top", label: "Top performeur", icon: "fa-medal" },
         ],
     },
     manager: {
@@ -621,9 +771,12 @@ function renderDashboardSectionHtml(sectionKey) {
     const section = DASHBOARD_SECTIONS[sectionKey];
     if (!section) return "";
     const cards = section.cards.map((c) =>
-        `<div class="stat-card"><i class="fas ${c.icon}"></i><div class="stat-info"><h3>${c.label}</h3><p id="${c.id}">--</p></div></div>`
+        `<div class="stat-card stat-animated" ${c.tip ? `title="${c.tip}"` : ""}>
+            <i class="fas ${c.icon}"></i>
+            <div class="stat-info"><h3>${c.label}</h3><p id="${c.id}">--</p></div>
+        </div>`
     ).join("");
-    return `<div class="dashboard-section panel"><h2><i class="fas ${section.icon}"></i> ${section.title}</h2><div class="dashboard-grid">${cards}</div></div>`;
+    return `<div class="dashboard-section panel dashboard-zone-kpis"><h2><i class="fas ${section.icon}"></i> ${section.title}</h2><div class="dashboard-grid">${cards}</div></div>`;
 }
 
 function renderDashboardShortcuts() {
@@ -641,37 +794,154 @@ function renderDashboardShortcuts() {
         if (canAccessModule("presences", "read")) shortcuts.push({ module: "presences", label: "Demander un congé", icon: "fa-umbrella-beach" });
     }
     if (!shortcuts.length) return "";
-    return `<div class="dashboard-shortcuts panel"><h2><i class="fas fa-bolt"></i> Raccourcis</h2><div class="shortcut-grid">${
+    return `<div class="dashboard-zone dashboard-zone-actions dashboard-shortcuts panel"><h2><i class="fas fa-bolt"></i> Raccourcis</h2><div class="shortcut-grid">${
         shortcuts.map((s) => `<button type="button" class="btn btn-secondary shortcut-btn" onclick="loadModule('${s.module}')"><i class="fas ${s.icon}"></i> ${s.label}</button>`).join("")
     }</div></div>`;
 }
 
 async function renderDashboard() {
+    if (!contentArea) contentArea = document.getElementById("content-area");
+    if (!contentArea) {
+        console.error("[OTOMIA] renderDashboard — #content-area introuvable");
+        return;
+    }
+    if (typeof destroyDashboardCharts === "function") destroyDashboardCharts();
     const sections = getDashboardSectionsForRole();
     const role = currentUser?.role || "";
-    const showCharts = ["SUPER_ADMIN", "ADMIN_RH", "GESTIONNAIRE_RH"].includes(role);
+    const showCockpit = ["SUPER_ADMIN", "ADMIN_RH", "GESTIONNAIRE_RH", "GESTIONNAIRE_PAIE", "RESPONSABLE_HIERARCHIQUE"].includes(role);
     const showActivities = role !== "EMPLOYE";
+    const now = new Date();
+    const monthOpts = Array.from({ length: 12 }, (_, i) => {
+        const m = i + 1;
+        return `<option value="${m}" ${m === now.getMonth() + 1 ? "selected" : ""}>${new Date(2000, i, 1).toLocaleString("fr-FR", { month: "long" })}</option>`;
+    }).join("");
+    const yearOpts = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
+        .map((y) => `<option value="${y}" ${y === now.getFullYear() ? "selected" : ""}>${y}</option>`).join("");
+
     contentArea.innerHTML = `
-        <div class="page-header">
-            <h1>Tableau de bord</h1>
-            <p>Vue d'ensemble — ${currentUser.role_label || currentUser.role}</p>
+        <div class="page-header dashboard-header">
+            <div>
+                <h1><i class="fas fa-chart-line"></i> Tableau de bord</h1>
+                <p>Cockpit RH — ${currentUser.role_label || currentUser.role}</p>
+            </div>
+            ${showCockpit ? `<div class="dashboard-filters">
+                <select id="dash-filter-month" onchange="onDashboardFilterChange()" title="Mois">${monthOpts}</select>
+                <select id="dash-filter-year" onchange="onDashboardFilterChange()" title="Année">${yearOpts}</select>
+                <select id="dash-filter-dept" onchange="onDashboardFilterChange()" title="Département"><option value="">Tous départements</option></select>
+                <select id="dash-filter-employee" onchange="onDashboardFilterChange()" title="Employé"><option value="">Tous employés</option></select>
+                <select id="dash-filter-contract" onchange="onDashboardFilterChange()" title="Type de contrat">
+                    <option value="">Tous contrats</option>
+                    <option value="CDI">CDI</option><option value="CDD">CDD</option>
+                    <option value="Stage">Stage</option><option value="Consultant">Consultant</option>
+                    <option value="Freelance">Freelance</option><option value="Intérim">Intérim</option>
+                </select>
+                <select id="dash-filter-gender" onchange="onDashboardFilterChange()" title="Sexe">
+                    <option value="">Tous</option><option value="M">Hommes</option><option value="F">Femmes</option><option value="O">Autres</option>
+                </select>
+                <select id="dash-filter-age" onchange="onDashboardFilterChange()" title="Tranche d'âge">
+                    <option value="">Tous âges</option>
+                    <option value="18-25">18-25 ans</option><option value="26-35">26-35 ans</option>
+                    <option value="36-45">36-45 ans</option><option value="46-55">46-55 ans</option><option value="55+">55+ ans</option>
+                </select>
+                <input id="dash-filter-site" type="text" placeholder="Site / agence" onchange="onDashboardFilterChange()" title="Site ou agence">
+            </div>` : ""}
         </div>
-        <div id="dashboard-alerts" class="dashboard-alerts"></div>
-        ${renderDashboardShortcuts()}
-        ${sections.map(renderDashboardSectionHtml).join("")}
-        ${showCharts ? `
-        <div class="charts-grid">
-            <div class="chart-card"><h3>Répartition par département</h3><canvas id="dept-chart"></canvas></div>
-            <div class="chart-card"><h3>Répartition H/F</h3><canvas id="gender-chart"></canvas></div>
-        </div>` : ""}
-        ${showActivities ? `<div class="recent-activities panel">
-            <h2><i class="fas fa-history"></i> Activités récentes</h2>
-            <table><thead><tr><th>Action</th><th>Module</th><th>Utilisateur</th><th>Date</th></tr></thead>
-            <tbody id="activities-body"><tr><td colspan="4"><i class="fas fa-spinner fa-spin"></i> Chargement...</td></tr></tbody></table>
-        </div>` : ""}`;
+        <div id="dashboard-loader" class="dashboard-loader" hidden><i class="fas fa-spinner fa-spin"></i> Actualisation...</div>
+
+        <div class="dashboard-layout">
+            ${showCockpit ? `
+            <section class="dashboard-zone dashboard-zone-charts" aria-label="Analyses visuelles">
+                <h2 class="dashboard-zone-title"><i class="fas fa-chart-bar"></i> Analyses visuelles</h2>
+                <div class="charts-row charts-row-3">
+                    <div class="chart-card chart-priority"><h3><i class="fas fa-chart-pie"></i> Effectif par département</h3><canvas id="chart-dept-pie"></canvas></div>
+                    <div class="chart-card chart-priority"><h3><i class="fas fa-chart-line"></i> Évolution des effectifs</h3><canvas id="chart-headcount"></canvas></div>
+                    <div class="chart-card chart-priority"><h3><i class="fas fa-calendar-check"></i> Présences &amp; absences</h3><canvas id="chart-presences"></canvas></div>
+                </div>
+                <div class="charts-row charts-row-3">
+                    <div class="chart-card"><h3><i class="fas fa-coins"></i> Masse salariale</h3><canvas id="chart-payroll"></canvas></div>
+                    <div class="chart-card"><h3><i class="fas fa-filter"></i> Recrutement</h3><canvas id="chart-recruitment"></canvas></div>
+                    <div class="chart-card"><h3><i class="fas fa-star"></i> Performances</h3><canvas id="chart-performance"></canvas></div>
+                </div>
+                <div class="charts-row charts-row-2">
+                    <div class="chart-card"><h3><i class="fas fa-bullseye"></i> KPI &amp; objectifs</h3><canvas id="chart-kpi"></canvas></div>
+                    <div class="chart-card"><h3><i class="fas fa-graduation-cap"></i> Formations</h3><canvas id="chart-formation"></canvas></div>
+                </div>
+                <details class="dashboard-charts-extra">
+                    <summary><i class="fas fa-layer-group"></i> Analyses complémentaires</summary>
+                    <div class="charts-row charts-row-3">
+                        <div class="chart-card"><h3><i class="fas fa-venus-mars"></i> Répartition H/F</h3><canvas id="chart-gender"></canvas></div>
+                        <div class="chart-card"><h3><i class="fas fa-birthday-cake"></i> Répartition par âge</h3><canvas id="chart-age"></canvas></div>
+                        <div class="chart-card"><h3><i class="fas fa-file-signature"></i> Types de contrat</h3><canvas id="chart-contract"></canvas></div>
+                        <div class="chart-card chart-card-wide"><h3><i class="fas fa-chart-area"></i> Tendances RH mensuelles</h3><canvas id="chart-trends"></canvas></div>
+                        <div class="chart-card"><h3><i class="fas fa-line-chart"></i> Évolution performances</h3><canvas id="chart-perf-evolution"></canvas></div>
+                    </div>
+                </details>
+            </section>` : `
+            <section class="dashboard-zone dashboard-zone-kpis-block" aria-label="Indicateurs">
+                ${sections.map(renderDashboardSectionHtml).join("")}
+            </section>`}
+
+            ${showCockpit ? `
+            <section class="dashboard-zone dashboard-zone-kpis-block" aria-label="Indicateurs clés">
+                ${sections.map(renderDashboardSectionHtml).join("")}
+            </section>
+            <div id="dashboard-alerts" class="dashboard-alerts dashboard-zone-alerts"></div>
+            <div class="panel detailed-stats-panel dashboard-zone-analytics">
+                <h2><i class="fas fa-table"></i> Résumés analytiques</h2>
+                <div id="detailed-stats-grid" class="detailed-stats-grid">
+                    <p class="hint-text"><i class="fas fa-spinner fa-spin"></i> Chargement...</p>
+                </div>
+            </div>` : `<div id="dashboard-alerts" class="dashboard-alerts dashboard-zone-alerts"></div>`}
+
+            <section class="dashboard-zone dashboard-zone-secondary" aria-label="Listes et activités">
+                ${showCockpit ? `
+                <div class="dashboard-panels-row">
+                    <div class="panel top5-panel"><h2><i class="fas fa-trophy"></i> Top 5 employés</h2><ol id="top-employees-list" class="top-list"></ol></div>
+                    <div class="panel top5-panel"><h2><i class="fas fa-building"></i> Top 5 départements</h2><ol id="top-departments-list" class="top-list"></ol></div>
+                    <div class="panel calendar-panel"><h2><i class="fas fa-calendar-alt"></i> Calendrier RH</h2><div id="rh-calendar-list" class="calendar-list"></div></div>
+                </div>` : ""}
+                ${showActivities ? `<div class="recent-activities panel">
+                    <h2><i class="fas fa-history"></i> Activités récentes</h2>
+                    <table><thead><tr><th>Action</th><th>Module</th><th>Utilisateur</th><th>Date</th></tr></thead>
+                    <tbody id="activities-body"><tr><td colspan="4"><i class="fas fa-spinner fa-spin"></i> Chargement...</td></tr></tbody></table>
+                </div>` : ""}
+            </section>
+
+            ${renderDashboardShortcuts()}
+        </div>`;
     try {
-        await refreshDashboardData();
-    } catch (e) { contentArea.innerHTML += `<p class="error-message">${e.message}</p>`; }
+        if (showCockpit) await loadDashboardFilters();
+        await new Promise((r) => requestAnimationFrame(r));
+        await refreshDashboardData({ force: true });
+    } catch (e) {
+        if (typeof otomiaLogError === "function") otomiaLogError("renderDashboard data", e);
+        const alerts = document.getElementById("dashboard-alerts");
+        const apiMsg = classifyInitError(e);
+        const errHtml = `<div class="dashboard-alert warning"><i class="fas fa-exclamation-triangle"></i> ${apiMsg}</div>`;
+        if (alerts) alerts.insertAdjacentHTML("beforeend", errHtml);
+        else if (contentArea) contentArea.insertAdjacentHTML("beforeend", `<p class="error-message">${apiMsg}</p>`);
+    }
+}
+
+async function loadDashboardFilters() {
+    try {
+        const [depts, employees] = await Promise.all([
+            apiGet("/departments/"),
+            apiGet("/employees/"),
+        ]);
+        const deptSel = document.getElementById("dash-filter-dept");
+        if (deptSel) {
+            deptSel.innerHTML = '<option value="">Tous départements</option>' +
+                depts.map((d) => `<option value="${d.id}">${d.name}</option>`).join("");
+        }
+        const empSel = document.getElementById("dash-filter-employee");
+        if (empSel) {
+            empSel.innerHTML = '<option value="">Tous employés</option>' +
+                employees.filter((e) => e.status === "Active").map((e) =>
+                    `<option value="${e.id}">${e.full_name}</option>`
+                ).join("");
+        }
+    } catch (e) { /* ignore */ }
 }
 
 // --- Admin Personnel ---
@@ -771,7 +1041,7 @@ window.viewFile = async (id) => {
             <h4><i class="fas fa-user-shield"></i> Compte utilisateur</h4>
             <p><strong>Utilisateur :</strong> ${ua.username} | <strong>Rôle :</strong> ${ua.role_label || ua.role || "—"}</p>
             <div class="form-row" style="margin-top:8px">
-                <input id="emp-user-password" type="text" placeholder="Nouveau mot de passe (vide = généré auto)">
+                <input id="emp-user-password" type="password" placeholder="Nouveau mot de passe (vide = généré auto)" autocomplete="new-password">
                 <label><input type="checkbox" id="emp-user-send-email" checked> Envoyer par email</label>
                 <label><input type="checkbox" id="emp-user-force-change" checked> Forcer changement à la connexion</label>
             </div>
@@ -813,7 +1083,9 @@ window.manageEmployeePassword = async (id, action) => {
             force_password_change: document.getElementById("emp-user-force-change")?.checked ?? true,
         });
         status.textContent = `Mot de passe mis à jour pour ${r.username}${r.email_sent ? " — email envoyé" : r.email_error ? ` — email non envoyé (${r.email_error})` : ""}`;
-        if (r.password) alert(`Identifiants :\nUtilisateur : ${r.username}\nMot de passe : ${r.password}`);
+        if (r.password) {
+            alert(`Compte mis à jour pour ${r.username}.${r.email_sent ? "\nLes identifiants ont été envoyés par email." : "\nContactez l'administrateur RH pour récupérer le mot de passe."}`);
+        }
     } catch (e) {
         status.textContent = "";
         alert(e.message || "Erreur mot de passe.");
@@ -971,7 +1243,7 @@ window.exportPayrollGlobal = async (fmt) => {
             return;
         }
         const link = document.createElement("a");
-        link.href = `${API_HOST}${r.url}`;
+        link.href = `${getApiHost()}${r.url}`;
         link.download = r.filename || `ETAT_GLOBAL_PAIE_${m}_${y}.${fmt === "excel" ? "xlsx" : fmt === "word" ? "docx" : "pdf"}`;
         link.target = "_blank";
         link.click();
@@ -1068,7 +1340,7 @@ window.validatePay = async (id) => {
     const r = await apiPost(`/payroll/${id}/validate_payroll/`, {});
     await otomiaAfterMutation("paie", "Bulletin validé");
     if (r.pdf_url && confirm("Bulletin validé. Souhaitez-vous prévisualiser le PDF ?")) {
-        showPayslipPreviewModal(`${API_HOST}${r.pdf_url}`);
+        showPayslipPreviewModal(`${getApiHost()}${r.pdf_url}`);
     }
 };
 window.markPaid = async (id) => {
@@ -1116,7 +1388,7 @@ window.closePayslipPreview = () => {
 window.previewPay = async (id) => {
     try {
         const r = await apiGet(`/export/payslip/preview/?payroll_id=${id}`);
-        showPayslipPreviewModal(`${API_HOST}${r.url}`, r.filename || "Bulletin de paie");
+        showPayslipPreviewModal(`${getApiHost()}${r.url}`, r.filename || "Bulletin de paie");
     } catch (e) {
         alert(e.message || "Impossible de prévisualiser ce bulletin.");
     }
@@ -1128,15 +1400,15 @@ window.dlPay = async (id, fmt) => {
     try {
         const r = await apiGet(`/payroll/${id}/download_payslip/?export_format=${fmt}`);
         const ext = fmt === "excel" ? "xlsx" : fmt === "word" ? "docx" : "pdf";
-        const fileRes = await fetch(`${API_HOST}${r.url}`, { credentials: "include" });
+        const fileRes = await fetch(`${getApiHost()}${r.url}`, { credentials: "include" });
         if (!fileRes.ok) throw new Error("Fichier bulletin introuvable.");
         await downloadBlobFromResponse(fileRes, r.filename || `bulletin.${ext}`);
     } catch (e) {
         try {
             const r = await apiGet(`/export/payslip/?payroll_id=${id}&export_format=${fmt}`);
-            const fileRes = await fetch(`${API_HOST}${r.url}`, { credentials: "include" });
+            const fileRes = await fetch(`${getApiHost()}${r.url}`, { credentials: "include" });
             if (fileRes.ok) await downloadBlobFromResponse(fileRes, r.filename || "bulletin.pdf");
-            else window.open(`${API_HOST}${r.url}`, "_blank");
+            else window.open(`${getApiHost()}${r.url}`, "_blank");
         } catch (e2) {
             alert(e2.message || e.message || "Export impossible.");
         }
@@ -1373,13 +1645,13 @@ window.individualExportAction = async (action) => {
             const r = await apiGet(`/payroll/export-individual/?employee_id=${employee_id}&month=${month}&year=${year}&export_format=pdf`);
             console.debug("[OTOMIA] Aperçu API réponse", r);
             if (r.export_type !== "individual") throw new Error("Export global détecté — opération annulée.");
-            showPayslipPreviewModal(`${API_HOST}${r.url}`, r.filename);
+            showPayslipPreviewModal(`${getApiHost()}${r.url}`, r.filename);
             status.textContent = `Aperçu — ${r.filename}`;
             return;
         }
         if (action === "reprint") {
             const r = await apiGet(`/payroll/export-individual/?employee_id=${employee_id}&month=${month}&year=${year}&export_format=pdf`);
-            const w = window.open(`${API_HOST}${r.url}`, "_blank");
+            const w = window.open(`${getApiHost()}${r.url}`, "_blank");
             if (w) setTimeout(() => { try { w.print(); } catch (_) { /* ignore */ } }, 1500);
             status.textContent = "Bulletin ouvert pour impression.";
             return;
@@ -1403,93 +1675,7 @@ window.individualExportAction = async (action) => {
     }
 };
 
-// --- Présences & Congés ---
-async function renderPresences() {
-    const tabs = getActiveFeatures("presences", "menu_tab");
-    const leaveTypes = getActiveFeatures("presences", "leave_type");
-    const title = getModuleTitle("presences", "Présences & Congés");
-    const canWrite = canWriteModule("presences");
-    const tabsHtml = renderModuleTabsHtml(tabs.length ? tabs : [
-        { feature_key: "onglet_conges", feature_name: "Congés", icon: "fa-umbrella-beach" },
-        { feature_key: "onglet_presences", feature_name: "Présences", icon: "fa-clock" },
-        { feature_key: "onglet_missions", feature_name: "Missions", icon: "fa-briefcase" },
-        { feature_key: "onglet_types", feature_name: "Types de congés", icon: "fa-list" },
-    ], "pres-tabs");
-    const leaveOptions = leaveTypes.map((lt) =>
-        `<option value="${lt.feature_key}">${lt.feature_name}</option>`).join("");
-    contentArea.innerHTML = `
-        <div class="module-container animated-panel">
-            <div class="action-bar"><h2>${title}</h2>
-                ${canWrite ? `<button class="btn btn-primary" onclick="showLeaveRequestModal()"><i class="fas fa-plus"></i> Demander un congé</button>` : ""}
-            </div>
-            ${tabsHtml}
-            <div id="pres-stats-bar" class="dashboard-grid" style="margin-bottom:16px"></div>
-            <div class="module-tab-panel active" id="pres-panel-conges">
-                <table><thead><tr><th>Employé</th><th>Type</th><th>Début</th><th>Fin</th><th>Statut</th><th>Actions</th></tr></thead>
-                <tbody id="abs-list"></tbody></table>
-            </div>
-            <div class="module-tab-panel" id="pres-panel-presences">
-                <table><thead><tr><th>Employé</th><th>Date</th><th>Entrée</th><th>Sortie</th><th>Statut</th></tr></thead>
-                <tbody id="att-list"></tbody></table>
-            </div>
-            <div class="module-tab-panel" id="pres-panel-missions">
-                <table><thead><tr><th>Employé</th><th>Titre</th><th>Destination</th><th>Période</th><th>Statut</th></tr></thead>
-                <tbody id="miss-list"></tbody></table>
-            </div>
-            <div class="module-tab-panel" id="pres-panel-types">
-                <div class="feature-grid">${leaveTypes.map((lt) => `
-                    <div class="feature-card">
-                        <h4>${lt.feature_name}</h4>
-                        <p>${lt.description || ""}</p>
-                        <small>Max: ${lt.config?.max_days ?? "-"} j | Workflow: ${lt.config?.approval_workflow ?? "rh"} | Accordés: ${lt.config?.days_granted ?? 0} j</small>
-                    </div>`).join("") || "<p>Aucun type configuré — Paramètres → Personnalisation.</p>"}
-                </div>
-            </div>
-        </div>
-        <div id="leave-modal" class="custom-modal" hidden>
-            <div class="custom-modal-content panel">
-                <h3>Demande de congé</h3>
-                <div class="form-row">
-                    <div><label>Type</label><select id="leave-type">${leaveOptions}</select></div>
-                    <div><label>Date début</label><input type="date" id="leave-start"></div>
-                    <div><label>Date fin</label><input type="date" id="leave-end"></div>
-                </div>
-                <div><label>Motif</label><textarea id="leave-reason" rows="2"></textarea></div>
-                <div class="action-bar"><button class="btn btn-primary" onclick="submitLeaveRequest()">Envoyer</button>
-                <button class="btn btn-secondary" onclick="closeLeaveModal()">Annuler</button></div>
-            </div>
-        </div>`;
-    const tabMap = { onglet_conges: "conges", onglet_presences: "presences", onglet_missions: "missions", onglet_types: "types" };
-    bindModuleTabs("pres-tabs", (key) => {
-        document.querySelectorAll(".module-tab-panel").forEach((p) => p.classList.remove("active"));
-        const panel = document.getElementById(`pres-panel-${tabMap[key] || key.replace("onglet_", "")}`);
-        if (panel) panel.classList.add("active");
-    });
-    await refreshPresencesData();
-}
-window.showLeaveRequestModal = () => { document.getElementById("leave-modal").hidden = false; };
-window.closeLeaveModal = () => { document.getElementById("leave-modal").hidden = true; };
-window.submitLeaveRequest = async () => {
-    const empId = currentUser.employee_id;
-    if (!empId) return alert("Profil employé non lié.");
-    const typeKey = document.getElementById("leave-type").value;
-    const start = document.getElementById("leave-start").value;
-    const end = document.getElementById("leave-end").value;
-    const reason = document.getElementById("leave-reason").value;
-    if (!start || !end) return alert("Dates requises.");
-    await apiPost("/absences/", { employee: empId, absence_type: typeKey, start_date: start, end_date: end, reason, status: "Pending" });
-    closeLeaveModal();
-    await otomiaAfterMutation("presences", "Demande de congé envoyée");
-};
-window.approveAbs = async (id) => {
-    await apiPost(`/absences/${id}/approve_absence/`, {});
-    await otomiaAfterMutation("presences", "Congé approuvé");
-};
-window.rejectAbs = async (id) => {
-    await apiPost(`/absences/${id}/reject_absence/`, {});
-    await otomiaAfterMutation("presences", "Congé refusé");
-};
-window.requestLeave = () => showLeaveRequestModal();
+// --- Présences & Congés → voir presences.js ---
 
 // --- Recrutement → voir recruitment.js ---
 
@@ -1626,7 +1812,10 @@ async function renderPortailEmploye() {
             </div>
 
             <div class="portail-section panel" id="tab-presences">
-                <h3>Présences du mois</h3>
+                <div class="action-bar">
+                    <h3>Présences du mois</h3>
+                    <button class="btn btn-primary btn-small" onclick="portalClockIn()"><i class="fas fa-fingerprint"></i> Pointer ma présence</button>
+                </div>
                 <p>Présents: ${portal.attendance_summary.present} | Retards: ${portal.attendance_summary.late} | Absents: ${portal.attendance_summary.absent}</p>
                 <table><thead><tr><th>Date</th><th>Entrée</th><th>Sortie</th><th>Statut</th></tr></thead>
                 <tbody>${portal.attendances.map((a) => `<tr><td>${a.date}</td><td>${a.check_in || "-"}</td><td>${a.check_out || "-"}</td><td>${a.status}</td></tr>`).join("") || "<tr><td colspan='4'>Aucune donnée</td></tr>"}</tbody></table>
@@ -1663,7 +1852,7 @@ async function renderPortailEmploye() {
                 <tbody>${portal.documents.map((d) => `<tr>
                     <td>${d.title}</td><td>${d.document_type || "-"}</td>
                     <td>${new Date(d.uploaded_at).toLocaleDateString("fr-FR")}</td>
-                    <td>${d.file ? `<a class="btn btn-small" href="${API_HOST}${d.file}" target="_blank"><i class="fas fa-download"></i></a>` : "—"}</td>
+                    <td>${d.file ? `<a class="btn btn-small" href="${getApiHost()}${d.file}" target="_blank"><i class="fas fa-download"></i></a>` : "—"}</td>
                 </tr>`).join("") || "<tr><td colspan='4'>Aucun document</td></tr>"}</tbody></table>
             </div>
 
@@ -1752,57 +1941,154 @@ window.saveProfile = async () => {
 };
 
 // --- Reporting ---
+let _reportingRenderId = 0;
+
+const DEFAULT_REPORT_WIDGETS = [
+    { feature_name: "Effectif total", icon: "fa-users", config: { widget_type: "stat", data_source: "total_employees" } },
+    { feature_name: "Masse salariale", icon: "fa-money-bill-wave", config: { widget_type: "stat", data_source: "payroll_mass", format: "money" } },
+    { feature_name: "Répartition H/F", icon: "fa-venus-mars", config: { widget_type: "stat", data_source: "gender_distribution" } },
+    { feature_name: "Absentéisme", icon: "fa-chart-line", config: { widget_type: "stat", data_source: "absenteeism_rate", suffix: "%" } },
+    { feature_name: "Répartition par département", icon: "fa-building", config: { widget_type: "chart", chart_type: "bar", data_source: "department_distribution" } },
+    { feature_name: "Répartition Homme/Femme", icon: "fa-chart-pie", config: { widget_type: "chart", chart_type: "doughnut", data_source: "gender_distribution" } },
+    { feature_name: "Évolution des effectifs", icon: "fa-chart-area", config: { widget_type: "chart", chart_type: "line", data_source: "monthly_headcount" } },
+    { feature_name: "Absences mensuelles", icon: "fa-user-clock", config: { widget_type: "chart", chart_type: "bar", data_source: "monthly_absences" } },
+];
+
+function getReportingWidgets() {
+    const widgets = getActiveFeatures("reporting", "report_widget");
+    return widgets.length ? widgets : DEFAULT_REPORT_WIDGETS;
+}
+
+function isReportingViewActive() {
+    return Boolean(document.getElementById("report-widgets"));
+}
+
 function getReportWidgetValue(stats, source, config) {
-    if (source === "payroll_mass") return formatMoney(stats.payroll_mass);
-    if (source === "gender_distribution") return `${stats.gender_distribution.hommes} H / ${stats.gender_distribution.femmes} F`;
-    if (source === "absenteeism_rate") return `${stats.absenteeism_rate}${config?.suffix || "%"}`;
+    if (!stats || typeof stats !== "object") return "-";
+    if (source === "payroll_mass") return formatMoney(stats.payroll_mass ?? 0);
+    if (source === "gender_distribution") {
+        const g = stats.gender_distribution || {};
+        return `${g.hommes ?? 0} H / ${g.femmes ?? 0} F`;
+    }
+    if (source === "absenteeism_rate") return `${stats.absenteeism_rate ?? 0}${config?.suffix || "%"}`;
     return stats[source] ?? "-";
 }
 
 function buildReportChart(canvasId, widget, stats) {
+    if (!stats || typeof stats !== "object") return;
     const cfg = widget.config || {};
     const src = cfg.data_source;
     const ctx = document.getElementById(canvasId);
-    if (!ctx) return;
+    if (!ctx || typeof Chart === "undefined") return;
     let chartConfig = null;
     if (src === "department_distribution") {
+        const rows = stats.department_distribution;
+        if (!Array.isArray(rows) || !rows.length) return;
         chartConfig = { type: cfg.chart_type || "bar", data: {
-            labels: stats.department_distribution.map((d) => d.name),
-            datasets: [{ label: "Employés", data: stats.department_distribution.map((d) => d.count), backgroundColor: "#1a5f9e" }],
+            labels: rows.map((d) => d.name),
+            datasets: [{ label: "Employés", data: rows.map((d) => d.count), backgroundColor: "#1a5f9e" }],
         }};
     } else if (src === "gender_distribution") {
+        const g = stats.gender_distribution || {};
         chartConfig = { type: cfg.chart_type || "doughnut", data: {
             labels: ["Hommes", "Femmes"],
-            datasets: [{ data: [stats.gender_distribution.hommes, stats.gender_distribution.femmes], backgroundColor: ["#1a5f9e", "#e74c3c"] }],
+            datasets: [{ data: [g.hommes ?? 0, g.femmes ?? 0], backgroundColor: ["#1a5f9e", "#e74c3c"] }],
         }};
     } else if (src === "monthly_headcount") {
+        const rows = stats.monthly_headcount;
+        if (!Array.isArray(rows) || !rows.length) return;
         chartConfig = { type: "line", data: {
-            labels: stats.monthly_headcount.map((m) => m.month),
-            datasets: [{ label: "Effectif", data: stats.monthly_headcount.map((m) => m.count), borderColor: "#1a5f9e", tension: 0.3, fill: true, backgroundColor: "rgba(26,95,158,0.1)" }],
+            labels: rows.map((m) => m.month),
+            datasets: [{ label: "Effectif", data: rows.map((m) => m.count), borderColor: "#1a5f9e", tension: 0.3, fill: true, backgroundColor: "rgba(26,95,158,0.1)" }],
         }};
     } else if (src === "monthly_absences") {
+        const rows = stats.monthly_absences;
+        if (!Array.isArray(rows) || !rows.length) return;
         chartConfig = { type: "bar", data: {
-            labels: stats.monthly_absences.map((m) => m.month),
-            datasets: [{ label: "Absences", data: stats.monthly_absences.map((m) => m.count), backgroundColor: "#e67e22" }],
+            labels: rows.map((m) => m.month),
+            datasets: [{ label: "Absences", data: rows.map((m) => m.count), backgroundColor: "#e67e22" }],
         }};
     } else if (src === "hr_comparison") {
+        const cmp = stats.hr_comparison;
+        if (!cmp?.labels?.length || !cmp?.values?.length) return;
         chartConfig = { type: "bar", data: {
-            labels: stats.hr_comparison.labels,
-            datasets: [{ label: "Indicateurs RH", data: stats.hr_comparison.values, backgroundColor: ["#1a5f9e", "#27ae60", "#8e44ad", "#e74c3c", "#f39c12"] }],
+            labels: cmp.labels,
+            datasets: [{ label: "Indicateurs RH", data: cmp.values, backgroundColor: ["#1a5f9e", "#27ae60", "#8e44ad", "#e74c3c", "#f39c12"] }],
         }};
     }
-    if (chartConfig) {
+    if (!chartConfig) return;
+    try {
         const chart = new Chart(ctx, { ...chartConfig, options: { responsive: true, animation: { duration: 800 }, plugins: { legend: { display: chartConfig.type !== "bar" } } } });
         reportCharts.push(chart);
+    } catch (e) {
+        console.error("[OTOMIA] buildReportChart", canvasId, e);
     }
 }
 
-async function renderReporting() {
+function buildReportingWidgetsHtml(activeWidgets, filter) {
+    let chartIdx = 0;
+    const parts = activeWidgets.map((w) => {
+        const cfg = w.config || {};
+        if (filter === "stat" && cfg.widget_type !== "stat") return "";
+        if (filter === "chart" && cfg.widget_type !== "chart") return "";
+        if (cfg.widget_type === "chart") {
+            const id = `report-chart-${chartIdx++}`;
+            return `<div class="chart-card chart-animated"><h3>${w.icon ? `<i class="fas ${w.icon}"></i> ` : ""}${w.feature_name}</h3><canvas id="${id}"></canvas></div>`;
+        }
+        return `<div class="stat-card stat-animated"><i class="fas ${w.icon || "fa-chart-bar"}"></i>
+            <div class="stat-info"><h3>${w.feature_name}</h3><p class="report-stat-val" data-source="${cfg.data_source}" data-format="${cfg.format || ""}" data-suffix="${cfg.suffix || ""}">--</p></div></div>`;
+    }).filter(Boolean);
+    if (!parts.length) {
+        return `<p class="feature-help">Aucune donnée disponible pour la période sélectionnée.</p>`;
+    }
+    return parts.join("");
+}
+
+function populateReportingWidgets(container, activeWidgets, stats, filter) {
+    if (!container || !container.isConnected) {
+        console.warn("[OTOMIA] populateReportingWidgets — conteneur absent ou détaché");
+        return;
+    }
     destroyReportCharts();
-    const widgets = getActiveFeatures("reporting", "report_widget");
-    const title = getModuleTitle("reporting", "Reporting & Statistiques");
-    const currentFilter = window._reportFilter || "all";
-    contentArea.innerHTML = `
+    container.innerHTML = buildReportingWidgetsHtml(activeWidgets, filter);
+    if (!document.getElementById("report-widgets")) return;
+
+    container.querySelectorAll(".report-stat-val").forEach((el) => {
+        try {
+            const src = el.dataset.source;
+            const val = getReportWidgetValue(stats, src, { format: el.dataset.format, suffix: el.dataset.suffix });
+            if (el.dataset.format === "money") {
+                animateCounter(el, stats?.payroll_mass ?? 0, { format: "money" });
+            } else if (src === "absenteeism_rate") {
+                animateCounter(el, stats?.absenteeism_rate ?? 0, { suffix: "%" });
+            } else if (typeof stats?.[src] === "number") {
+                animateCounter(el, stats[src]);
+            } else {
+                el.textContent = val;
+            }
+        } catch (e) {
+            console.error("[OTOMIA] report stat widget", e);
+            el.textContent = "—";
+        }
+    });
+
+    let chartIdx = 0;
+    activeWidgets.forEach((w) => {
+        const cfg = w.config || {};
+        if (filter === "stat" && cfg.widget_type !== "stat") return;
+        if (filter === "chart" && cfg.widget_type !== "chart") return;
+        if (cfg.widget_type === "chart") {
+            try {
+                buildReportChart(`report-chart-${chartIdx++}`, w, stats);
+            } catch (e) {
+                console.error("[OTOMIA] report chart widget", w.feature_name, e);
+            }
+        }
+    });
+}
+
+function renderReportingShell(title, currentFilter) {
+    return `
         <div class="module-container animated-panel">
             <div class="action-bar"><h2>${title}</h2>
                 <div class="export-bar">
@@ -1816,47 +2102,76 @@ async function renderReporting() {
                     <button class="btn btn-secondary" onclick="exportReport('word')"><i class="fas fa-file-word"></i> Word</button>
                 </div>
             </div>
-            <div id="report-widgets" class="reporting-layout"></div>
+            <div id="report-widgets" class="reporting-layout">
+                <div class="loader"><i class="fas fa-spinner fa-spin"></i> Chargement des statistiques...</div>
+            </div>
         </div>`;
-    const s = await apiGet("/dashboard/");
-    const filter = currentFilter;
-    const activeWidgets = widgets.length ? widgets : [];
+}
+
+async function refreshReportingData(opts = {}) {
+    if (!isReportingViewActive()) return;
+    const renderId = _reportingRenderId;
+    try {
+        const stats = await apiGet("/dashboard/");
+        if (renderId !== _reportingRenderId || !isReportingViewActive()) return;
+        const container = document.getElementById("report-widgets");
+        if (!container) {
+            console.error("[OTOMIA] refreshReportingData — #report-widgets introuvable après API");
+            return;
+        }
+        const activeWidgets = getReportingWidgets();
+        const filter = window._reportFilter || "all";
+        populateReportingWidgets(container, activeWidgets, stats, filter);
+    } catch (e) {
+        if (renderId !== _reportingRenderId || !isReportingViewActive()) return;
+        console.error("[OTOMIA] refreshReportingData", e);
+        const msg = typeof classifyInitError === "function"
+            ? classifyInitError(e)
+            : "Les statistiques ne peuvent pas être chargées pour le moment.";
+        const container = document.getElementById("report-widgets");
+        if (container) {
+            container.innerHTML = `<p class="error-message">${msg}</p>`;
+        }
+    }
+}
+window.refreshReportingData = refreshReportingData;
+
+window.renderReporting = async function renderReporting() {
+    const renderId = ++_reportingRenderId;
+    if (!contentArea) contentArea = document.getElementById("content-area");
+    if (!contentArea) {
+        console.error("[OTOMIA] renderReporting — #content-area introuvable");
+        return;
+    }
+
+    destroyReportCharts();
+    const title = getModuleTitle("reporting", "Reporting & Statistiques");
+    const currentFilter = window._reportFilter || "all";
+    contentArea.innerHTML = renderReportingShell(title, currentFilter);
+
     const container = document.getElementById("report-widgets");
-    let chartIdx = 0;
-    container.innerHTML = activeWidgets.map((w) => {
-        const cfg = w.config || {};
-        if (filter === "stat" && cfg.widget_type !== "stat") return "";
-        if (filter === "chart" && cfg.widget_type !== "chart") return "";
-        if (cfg.widget_type === "chart") {
-            const id = `report-chart-${chartIdx++}`;
-            return `<div class="chart-card chart-animated"><h3>${w.icon ? `<i class="fas ${w.icon}"></i> ` : ""}${w.feature_name}</h3><canvas id="${id}"></canvas></div>`;
+    if (!container) {
+        console.error("[OTOMIA] renderReporting — #report-widgets introuvable après injection");
+        contentArea.innerHTML = `<div class="panel"><p class="error-message">Impossible d'afficher le module Reporting. Veuillez réessayer.</p>
+            <button class="btn btn-primary" onclick="loadModule('reporting')">Réessayer</button></div>`;
+        return;
+    }
+
+    try {
+        await refreshReportingData({ force: true });
+        if (renderId !== _reportingRenderId) return;
+    } catch (e) {
+        if (renderId !== _reportingRenderId) return;
+        if (typeof otomiaLogError === "function") otomiaLogError("renderReporting", e);
+        const c = document.getElementById("report-widgets");
+        if (c) {
+            c.innerHTML = `<p class="error-message">Les statistiques ne peuvent pas être chargées pour le moment.</p>`;
         }
-        return `<div class="stat-card stat-animated"><i class="fas ${w.icon || "fa-chart-bar"}"></i>
-            <div class="stat-info"><h3>${w.feature_name}</h3><p class="report-stat-val" data-source="${cfg.data_source}" data-format="${cfg.format || ""}" data-suffix="${cfg.suffix || ""}">--</p></div></div>`;
-    }).join("") || `<p class="feature-help">Aucun widget configuré. Paramètres → Personnalisation → Reporting.</p>`;
-    document.querySelectorAll(".report-stat-val").forEach((el) => {
-        const src = el.dataset.source;
-        const val = getReportWidgetValue(s, src, { format: el.dataset.format, suffix: el.dataset.suffix });
-        if (el.dataset.format === "money") {
-            animateCounter(el, s.payroll_mass, { format: "money" });
-        } else if (src === "absenteeism_rate") {
-            animateCounter(el, s.absenteeism_rate, { suffix: "%" });
-        } else if (typeof s[src] === "number") {
-            animateCounter(el, s[src]);
-        } else {
-            el.textContent = val;
-        }
-    });
-    chartIdx = 0;
-    activeWidgets.forEach((w) => {
-        if ((w.config || {}).widget_type === "chart") {
-            buildReportChart(`report-chart-${chartIdx++}`, w, s);
-        }
-    });
+    }
 }
 window.exportReport = async (fmt) => {
     const r = await apiGet(`/export/${fmt}/`);
-    window.open(`${API_HOST}${r.url}`, "_blank");
+    window.open(`${getApiHost()}${r.url}`, "_blank");
 };
 
 window.loadModule = loadModule;

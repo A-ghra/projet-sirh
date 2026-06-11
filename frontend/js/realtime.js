@@ -38,6 +38,9 @@ window.otomiaFetchSync = async function otomiaFetchSync() {
     const payYear = document.getElementById("pay-year");
     if (payMonth?.value) params.set("month", payMonth.value);
     if (payYear?.value) params.set("year", payYear.value);
+    if (typeof getDashboardFilterParams === "function" && document.getElementById("dash-filter-month")) {
+        getDashboardFilterParams().forEach((v, k) => params.set(k, v));
+    }
     return apiFetch(`/sync/?${params}`, { cache: "no-store" });
 };
 
@@ -55,7 +58,7 @@ window.otomiaAfterMutation = async function otomiaAfterMutation(module, message,
     if (message) showToast(message, options.error ? "error" : "success");
     try {
         const refresher = OTOMIA_MODULE_REFRESHERS[module];
-        if (refresher) await refresher({ force: true });
+        if (refresher) await refresher({ force: true, full: module === "presences" });
         if (!options.skipDashboard && module !== "dashboard") {
             await window.refreshDashboardData?.({ force: true });
         }
@@ -94,45 +97,75 @@ function safeChartUpdate(chart, updateFn) {
 window.refreshDashboardData = async function refreshDashboardData(options = {}) {
     if (!document.getElementById("kpi-rh-total") && !document.getElementById("kpi-emp-payslips") && !document.getElementById("kpi-pay-bulletins")) return;
     _kpiAnimate = !options.silent;
+    const loader = document.getElementById("dashboard-loader");
+    if (loader && options.force) loader.hidden = false;
     try {
-        const ts = Date.now();
-        const [dash, sync] = await Promise.all([
-            apiFetch(`/dashboard/?_=${ts}`, { cache: "no-store" }),
-            window.otomiaFetchSync(),
-        ]);
+        const sync = await window.otomiaFetchSync();
+        const dash = sync.dashboard || {};
+
+        if (typeof renderDashboardCharts === "function") {
+            renderDashboardCharts(dash, sync);
+        }
+
         const pres = sync.presences || {};
-        const pay = sync.payroll || {};
+        const pay = sync.payroll || dash.payroll_summary || {};
         const rec = sync.recruitment || {};
         const form = sync.formation || {};
         const perf = sync.performance || {};
         const perfDetail = perf.performance || {};
         const mgr = sync.manager || {};
         const emp = sync.employee || {};
+        const gender = dash.gender_distribution || {};
 
         setKpi("kpi-rh-total", dash.total_employees);
-        setKpi("kpi-rh-active", dash.total_employees);
-        setKpi("kpi-rh-hires", dash.open_recruitments);
+        setKpi("kpi-rh-active", dash.active_employees ?? dash.total_employees);
+        setKpi("kpi-rh-new", dash.new_hires_month);
         setKpi("kpi-rh-contracts", dash.contracts_expiring_soon);
+        const genderEl = document.getElementById("kpi-rh-gender");
+        if (genderEl) {
+            const autres = gender.autres ? ` / ${gender.autres} A` : "";
+            genderEl.textContent = `${gender.hommes || 0} H / ${gender.femmes || 0} F${autres}`;
+        }
+        setKpi("kpi-rh-turnover", dash.turnover_rate_annual, { suffix: "%" });
+        const seniorityEl = document.getElementById("kpi-rh-seniority");
+        if (seniorityEl && dash.avg_seniority_years !== undefined) {
+            seniorityEl.textContent = `${dash.avg_seniority_years} ans`;
+        }
         setKpi("kpi-pay-bulletins", pay.total_bulletins);
         setKpi("kpi-pay-mass", pay.net_mass || dash.payroll_mass, { format: "money" });
+        setKpi("kpi-pay-evolution", pay.payroll_evolution_pct ?? dash.payroll_evolution_pct, { suffix: "%" });
+        setKpi("kpi-pay-deductions", pay.total_deductions ?? dash.total_deductions, { format: "money" });
+        setKpi("kpi-pay-avg", dash.avg_cost_per_employee, { format: "money" });
         setKpi("kpi-pay-pending", pay.pending_count);
         setKpi("kpi-pay-exports", pay.exports_count);
-        setKpi("kpi-pres-present", pres.present_today);
+        setKpi("kpi-pres-present", pres.present_today ?? dash.present_today);
         setKpi("kpi-pres-absent", pres.absent_today ?? dash.absences_today);
         setKpi("kpi-pres-leaves", pres.approved_leaves);
-        setKpi("kpi-pres-late", pres.late_today);
+        setKpi("kpi-pres-late", pres.late_today ?? dash.late_today);
+        setKpi("kpi-pres-rate", pres.attendance_rate_month ?? dash.attendance_rate_month, { suffix: "%" });
+        setKpi("kpi-pres-abs-rate", dash.absenteeism_rate_month ?? pres.absenteeism_rate, { suffix: "%" });
+        setKpi("kpi-pres-avg-leave", dash.avg_leave_days);
         setKpi("kpi-rec-applicants", rec.applicants_total);
         setKpi("kpi-rec-interviews", rec.interview_scheduled);
         setKpi("kpi-rec-accepted", rec.accepted);
         setKpi("kpi-rec-rejected", rec.rejected);
+        setKpi("kpi-rec-open", rec.open_recruitments ?? dash.open_recruitments);
+        setKpi("kpi-rec-conversion", dash.conversion_rate ?? rec.conversion_rate, { suffix: "%" });
+        setKpi("kpi-rec-delay", dash.avg_recruitment_days, { suffix: " j" });
         setKpi("kpi-form-progress", form.in_progress);
         setKpi("kpi-form-done", form.completed);
         setKpi("kpi-form-participants", form.participants_registered);
         setKpi("kpi-form-results", form.results_registered);
+        setKpi("kpi-form-rate", form.success_rate, { suffix: "%" });
+        setKpi("kpi-form-hours", dash.training_hours_avg);
+        setKpi("kpi-form-participation", dash.participation_rate ?? form.participation_rate, { suffix: "%" });
         setKpi("kpi-perf-reviews", perfDetail.total_evaluations ?? dash.evaluations_count);
         setKpi("kpi-perf-objectives", perf.objectives_completed);
+        setKpi("kpi-perf-obj-rate", dash.objective_achievement_rate, { suffix: "%" });
         setKpi("kpi-perf-kpis", perf.kpis_count);
         setKpi("kpi-perf-avg", perfDetail.average_score ?? perf.avg_kpi_achievement, { suffix: perfDetail.average_score ? "/100" : "%" });
+        const topPerfEl = document.getElementById("kpi-perf-top");
+        if (topPerfEl) topPerfEl.textContent = dash.top_employees?.[0]?.name || "—";
         setKpi("kpi-mgr-team", mgr.team_size);
         setKpi("kpi-mgr-pending", mgr.pending_leaves ?? pres.pending_leaves);
         setKpi("kpi-mgr-reviews", mgr.team_reviews ?? perfDetail.total_evaluations ?? dash.evaluations_count);
@@ -148,10 +181,17 @@ window.refreshDashboardData = async function refreshDashboardData(options = {}) 
             const alerts = [];
             if (emp.notifications_count > 0) alerts.push(`<div class="dashboard-alert info"><i class="fas fa-bell"></i> ${emp.notifications_count} notification(s) non lue(s)</div>`);
             if (emp.leave_balance !== undefined) alerts.push(`<div class="dashboard-alert info"><i class="fas fa-umbrella-beach"></i> Solde congés : ${emp.leave_balance} jour(s)</div>`);
-            if (pres.pending_leaves > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-exclamation-triangle"></i> ${pres.pending_leaves} demande(s) de congé en attente</div>`);
-            if (pay.pending_count > 0) alerts.push(`<div class="dashboard-alert info"><i class="fas fa-info-circle"></i> ${pay.pending_count} paie(s) en attente</div>`);
-            if (perf.certifications_expiring > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-certificate"></i> ${perf.certifications_expiring} certification(s) à renouveler</div>`);
-            if (dash.contracts_expiring_soon > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-file-contract"></i> ${dash.contracts_expiring_soon} contrat(s) à échéance</div>`);
+            if (pres.pending_leaves > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-exclamation-triangle"></i> ${pres.pending_leaves} demande(s) de congé à valider</div>`);
+            if (pay.pending_count > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-info-circle"></i> ${pay.pending_count} paie(s) en attente</div>`);
+            if (perf.certifications_expiring > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-certificate"></i> ${perf.certifications_expiring} certification(s) expirant bientôt</div>`);
+            if (dash.contracts_expiring_soon > 0) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-file-contract"></i> ${dash.contracts_expiring_soon} contrat(s) arrivant à expiration</div>`);
+            const lateCount = pres.late_today ?? dash.late_today ?? 0;
+            if (lateCount >= 3) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-clock"></i> ${lateCount} retard(s) enregistré(s) aujourd'hui</div>`);
+            const objPending = (perf.objectives_total || 0) - (perf.objectives_completed || 0);
+            if (objPending > 0) alerts.push(`<div class="dashboard-alert info"><i class="fas fa-bullseye"></i> ${objPending} objectif(s) non atteint(s)</div>`);
+            const absRate = dash.absenteeism_rate_month ?? 0;
+            if (absRate > 15) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-chart-line"></i> Hausse de l'absentéisme : ${absRate}% ce mois</div>`);
+            if (dash.budget_alert) alerts.push(`<div class="dashboard-alert warning"><i class="fas fa-wallet"></i> Dépassement budgétaire RH : masse salariale en hausse de ${dash.payroll_evolution_pct}%</div>`);
             alertsEl.innerHTML = alerts.join("");
         }
 
@@ -162,101 +202,27 @@ window.refreshDashboardData = async function refreshDashboardData(options = {}) 
             ).join("") || "<tr><td colspan='4'>Aucune activité</td></tr>";
         }
 
-        const deptCanvas = document.getElementById("dept-chart");
-        if (dash.department_distribution && deptCanvas) {
-            const labels = dash.department_distribution.map((d) => d.name);
-            const values = dash.department_distribution.map((d) => d.count);
-            if (!safeChartUpdate(deptChart, (c) => {
-                c.data.labels = labels;
-                c.data.datasets[0].data = values;
-            })) {
-                if (deptChart) { try { deptChart.destroy(); } catch (_) { /* ignore */ } deptChart = null; }
-                deptChart = new Chart(deptCanvas, {
-                    type: "bar",
-                    data: { labels, datasets: [{ label: "Employés", data: values, backgroundColor: "#1a5f9e" }] },
-                    options: { plugins: { legend: { display: false } }, animation: { duration: 400 } },
-                });
+        requestAnimationFrame(() => {
+            if (typeof renderDashboardDetails === "function") {
+                renderDashboardDetails(dash);
             }
-        }
-        const genderCanvas = document.getElementById("gender-chart");
-        if (dash.gender_distribution && genderCanvas) {
-            const gData = [dash.gender_distribution.hommes, dash.gender_distribution.femmes];
-            if (!safeChartUpdate(genderChart, (c) => { c.data.datasets[0].data = gData; })) {
-                if (genderChart) { try { genderChart.destroy(); } catch (_) { /* ignore */ } genderChart = null; }
-                genderChart = new Chart(genderCanvas, {
-                    type: "doughnut",
-                    data: { labels: ["Hommes", "Femmes"], datasets: [{ data: gData, backgroundColor: ["#1a5f9e", "#e74c3c"] }] },
-                    options: { animation: { duration: 400 } },
-                });
-            }
-        }
+        });
     } catch (e) {
-        console.warn("Dashboard refresh:", e.message);
+        console.error("[OTOMIA] Dashboard refresh:", e);
+        const alertsEl = document.getElementById("dashboard-alerts");
+        const msg = typeof classifyInitError === "function"
+            ? classifyInitError(e)
+            : (e?.message || "Données partiellement indisponibles");
+        if (alertsEl) {
+            alertsEl.insertAdjacentHTML("beforeend",
+                `<div class="dashboard-alert warning"><i class="fas fa-exclamation-triangle"></i> ${msg}</div>`);
+        }
+    } finally {
+        if (loader) loader.hidden = true;
     }
 };
 
-window.refreshPresencesData = async function refreshPresencesData(options = {}) {
-    if (!document.getElementById("abs-list")) return;
-    if (options.silent && !options.force) {
-        try {
-            const sync = await otomiaFetchSync();
-            const presStats = document.getElementById("pres-stats-bar");
-            if (presStats && sync.presences) {
-                const p = sync.presences;
-                presStats.innerHTML = `
-                    <div class="stat-card stat-animated"><i class="fas fa-user-check"></i><div class="stat-info"><h3>Présents aujourd'hui</h3><p>${p.present_today}</p></div></div>
-                    <div class="stat-card stat-animated"><i class="fas fa-clock"></i><div class="stat-info"><h3>Retards</h3><p>${p.late_today}</p></div></div>
-                    <div class="stat-card stat-animated"><i class="fas fa-user-times"></i><div class="stat-info"><h3>Absents</h3><p>${p.absent_today}</p></div></div>
-                    <div class="stat-card stat-animated"><i class="fas fa-umbrella-beach"></i><div class="stat-info"><h3>Congés en attente</h3><p>${p.pending_leaves}</p></div></div>
-                    <div class="stat-card stat-animated"><i class="fas fa-percentage"></i><div class="stat-info"><h3>Taux présence (mois)</h3><p>${p.attendance_rate_month}%</p></div></div>`;
-            }
-        } catch (e) { console.warn("Presences silent refresh:", e.message); }
-        return;
-    }
-    try {
-        const [absences, attendances, missions] = await Promise.all([
-            apiGet("/absences/"), apiGet("/attendance/"), apiGet("/missions/"),
-        ]);
-        const canValidate = canWriteModule("presences") && currentUser?.role !== "EMPLOYE";
-        const absEl = document.getElementById("abs-list");
-        if (absEl) {
-            absEl.innerHTML = absences.map((a) => `
-                <tr>
-                    <td>${a.employee_name}</td><td>${a.absence_type}</td>
-                    <td>${a.start_date}</td><td>${a.end_date}</td><td>${statusBadge(a.status)}</td>
-                    <td>${a.status === "Pending" && canValidate ? `
-                        <button class="btn btn-small btn-primary" onclick="approveAbs(${a.id})">Approuver</button>
-                        <button class="btn btn-small btn-danger" onclick="rejectAbs(${a.id})">Refuser</button>` : "-"}
-                    </td>
-                </tr>`).join("") || "<tr><td colspan='6'>Aucune demande</td></tr>";
-        }
-        const attEl = document.getElementById("att-list");
-        if (attEl) {
-            attEl.innerHTML = attendances.map((a) => `
-                <tr><td>${a.employee_name}</td><td>${a.date}</td><td>${a.check_in || "-"}</td>
-                <td>${a.check_out || "-"}</td><td>${a.status}</td></tr>`).join("") || "<tr><td colspan='5'>Aucune donnée</td></tr>";
-        }
-        const missEl = document.getElementById("miss-list");
-        if (missEl) {
-            missEl.innerHTML = missions.map((m) => `
-                <tr><td>${m.employee_name}</td><td>${m.title}</td><td>${m.destination}</td>
-                <td>${m.start_date} → ${m.end_date}</td><td>${m.status}</td></tr>`).join("") || "<tr><td colspan='5'>Aucune mission</td></tr>";
-        }
-        const sync = await otomiaFetchSync();
-        const presStats = document.getElementById("pres-stats-bar");
-        if (presStats && sync.presences) {
-            const p = sync.presences;
-            presStats.innerHTML = `
-                <div class="stat-card stat-animated"><i class="fas fa-user-check"></i><div class="stat-info"><h3>Présents aujourd'hui</h3><p>${p.present_today}</p></div></div>
-                <div class="stat-card stat-animated"><i class="fas fa-clock"></i><div class="stat-info"><h3>Retards</h3><p>${p.late_today}</p></div></div>
-                <div class="stat-card stat-animated"><i class="fas fa-user-times"></i><div class="stat-info"><h3>Absents</h3><p>${p.absent_today}</p></div></div>
-                <div class="stat-card stat-animated"><i class="fas fa-umbrella-beach"></i><div class="stat-info"><h3>Congés en attente</h3><p>${p.pending_leaves}</p></div></div>
-                <div class="stat-card stat-animated"><i class="fas fa-percentage"></i><div class="stat-info"><h3>Taux présence (mois)</h3><p>${p.attendance_rate_month}%</p></div></div>`;
-        }
-    } catch (e) {
-        console.warn("Presences refresh:", e.message);
-    }
-};
+/* refreshPresencesData → presences.js */
 
 async function otomiaPollTick() {
     if (_otomiaPollInFlight || document.hidden) return;

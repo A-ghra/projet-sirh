@@ -29,3 +29,9 @@ def notify_employee(employee, title, message, notification_type='general'):
             message=message,
             notification_type=notification_type,
         )
+
+
+def notify_manager(manager, title, message, notification_type='general'):
+    """Notifie le manager responsable (notification interne OTOMIA RH)."""
+    if manager:
+        notify_employee(manager, title, message, notification_type)

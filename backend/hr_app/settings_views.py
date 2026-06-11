@@ -9,10 +9,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
 from rest_framework.response import Response
 
 from .backup_service import create_configuration_backup, list_backups, restore_configuration_backup
-from .models import Role, UserProfile, SystemSettings, SystemBackup, CustomField, WorkScheduleSettings
+from .models import Role, UserProfile, SystemSettings, SystemBackup, CustomField, WorkScheduleSettings, PresenceAbsenceSettings
 from .permissions import get_user_role, ROLE_ADMIN
 from .serializers import (
-    SystemSettingsSerializer, WorkScheduleSettingsSerializer, SystemBackupSerializer, RoleSerializer,
+    SystemSettingsSerializer, WorkScheduleSettingsSerializer, PresenceAbsenceSettingsSerializer,
+    SystemBackupSerializer, RoleSerializer,
     CustomFieldSerializer, ManagedUserSerializer,
 )
 from .utils import log_action
@@ -70,6 +71,21 @@ def work_schedule_settings_view(request):
     ser.is_valid(raise_exception=True)
     ser.save()
     log_action(request.user, 'Mise à jour horaires de travail', 'Paramètres', '', request)
+    return Response(ser.data)
+
+
+@api_view(['GET', 'PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def presence_absence_settings_view(request):
+    obj = PresenceAbsenceSettings.get_settings()
+    if request.method == 'GET':
+        return Response(PresenceAbsenceSettingsSerializer(obj).data)
+    if not is_settings_admin(request.user):
+        return Response({'error': 'Accès réservé aux administrateurs.'}, status=403)
+    ser = PresenceAbsenceSettingsSerializer(obj, data=request.data, partial=True)
+    ser.is_valid(raise_exception=True)
+    ser.save()
+    log_action(request.user, 'Mise à jour absences automatiques', 'Paramètres', '', request)
     return Response(ser.data)
 
 
@@ -167,7 +183,11 @@ class ManagedUserViewSet(viewsets.ViewSet):
         user = User.objects.filter(pk=pk).first()
         if not user:
             return Response({'error': 'Utilisateur introuvable.'}, status=404)
-        new_pass = request.data.get('password', 'otomia2026')
+        import secrets
+        import string
+        new_pass = request.data.get('password') or ''.join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(12)
+        )
         user.password = make_password(new_pass)
         user.save()
         log_action(request.user, 'Réinitialisation mot de passe', 'Paramètres', user.username, request)

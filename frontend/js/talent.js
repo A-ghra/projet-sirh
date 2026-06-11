@@ -851,7 +851,7 @@ async function renderPerfCerts() {
         <td>${c.issue_date}</td><td>${c.expiry_date || "—"}</td>
         <td>${c.certificate_number || "—"}</td>
         <td>${certExpiryBadge(c.expiry_status, c.expiry_status_label)}</td>
-        <td>${c.document_url ? `<a class="btn btn-small" href="${API_HOST}${c.document_url}" target="_blank"><i class="fas fa-download"></i></a>` : "—"}</td>
+        <td>${c.document_url ? `<a class="btn btn-small" href="${getApiHost()}${c.document_url}" target="_blank"><i class="fas fa-download"></i></a>` : "—"}</td>
     </tr>`).join("") || "<tr><td colspan='8'>Aucune certification</td></tr>"}</tbody></table>`;
 }
 

@@ -83,24 +83,41 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CORS_ALLOWED_ORIGINS = [
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-]
+# CORS — frontend (5500+) → API Django (8000), cookies session + CSRF
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'authorization',
+    'content-type',
+    'csrf-token',
+    'x-csrftoken',
+    'x-requested-with',
+    'cache-control',
+    'pragma',
+]
+CORS_EXPOSE_HEADERS = [
+    'content-type',
+    'x-csrftoken',
+    'content-disposition',
+    'x-export-type',
+]
 
 CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5500',
     'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
     'http://localhost:8080',
     'http://127.0.0.1:8080',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
     'http://localhost:8765',
     'http://127.0.0.1:8765',
 ]
+for _port in range(5500, 5520):
+    CSRF_TRUSTED_ORIGINS.append(f'http://127.0.0.1:{_port}')
+    CSRF_TRUSTED_ORIGINS.append(f'http://localhost:{_port}')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -108,6 +125,14 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.FormParser',
+        'rest_framework.parsers.MultiPartParser',
     ],
 }
 
