@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # OTOMIA RH
 
 **Système Intelligent de Gestion des Ressources Humaines**
@@ -27,13 +28,25 @@ sudo mysql -e "CREATE DATABASE IF NOT EXISTS sirh_db CHARACTER SET utf8mb4 COLLA
 ```bash
 cd SIRH_FULL_PROJECT/backend
 pip install -r requirements.txt
+=======
+# Backend OTOMIA RH
+
+## Démarrage rapide
+
+```bash
+cd SIRH_FULL_PROJECT/backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# MySQL / MariaDB (XAMPP) — utiliser TCP si le socket local échoue
+mysql -h 127.0.0.1 -u root -e "CREATE DATABASE IF NOT EXISTS sirh_db CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+
+>>>>>>> bd1a7dd676c4b2a5dc9dbc9d52a5383871548530
 python manage.py migrate
 python seed_data.py
 python manage.py runserver
 ```
-
-API disponible sur : `http://127.0.0.1:8000/api/`
-
 ### 3. Frontend
 
 Servir le dossier `frontend/` avec un serveur HTTP local :
@@ -52,8 +65,7 @@ Ouvrir : `http://127.0.0.1:5500/login.html`
 | `admin` | `otomia2026` | Administrateur RH | Dashboard Admin |
 | `gestionnaire` | `otomia2026` | Gestionnaire RH / Paie | Dashboard RH |
 | `manager` | `otomia2026` | Responsable Hiérarchique | Dashboard Manager |
-| `employe` | `otomia2026` | Employé | Portail Employé |
-
+| `employe` | `otomia2026` | Employé | Portail Employé 
 ## API REST principale
 
 | Endpoint | Méthode | Description |
@@ -89,3 +101,15 @@ Ouvrir : `http://127.0.0.1:5500/login.html`
 - **Nom** : OTOMIA RH
 - **Slogan** : Système Intelligent de Gestion des Ressources Humaines
 - **Couleurs** : Bleu professionnel (#1a5f9e), Blanc, Gris moderne
+=======
+> **Note Django 4.2** : requis pour compatibilité MariaDB 10.4 (XAMPP). Django 5+ exige MariaDB 10.6+.
+
+## Comptes démo
+
+Mot de passe commun : `otomia2026`
+
+- `admin` — Administrateur RH
+- `gestionnaire` — Gestionnaire RH / Paie
+- `manager` — Responsable Hiérarchique
+- `employe` — Employé (portail)
+>>>>>>> bd1a7dd676c4b2a5dc9dbc9d52a5383871548530

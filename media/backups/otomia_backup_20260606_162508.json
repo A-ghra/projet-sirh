@@ -1,0 +1,1005 @@
+{
+  "version": "1.0",
+  "created_at": "2026-06-06T16:25:08.059330",
+  "models": {
+    "hr_app.companysettings": [
+      {
+        "model": "hr_app.companysettings",
+        "pk": 1,
+        "fields": {
+          "company_name": "OTOMIA RH SARL",
+          "company_acronym": "OTOMIA RH",
+          "company_slogan": "Système Intelligent de Gestion des Ressources Humaines",
+          "company_description": "",
+          "rccm": "CD/KIN/RCCM/24-B-00001",
+          "id_nat": "01-9-N12345K",
+          "tax_number": "",
+          "cnss_number": "CNSS-001234567",
+          "vat_number": "",
+          "approval_number": "",
+          "other_legal_refs": "",
+          "postal_address": "",
+          "headquarters_address": "Avenue du Commerce, Gombe, Kinshasa, RDC",
+          "commune": "Gombe",
+          "city": "Kinshasa",
+          "province": "Kinshasa",
+          "country": "RDC",
+          "phone_primary": "+243 81 000 00 00",
+          "phone_secondary": "",
+          "email": "contact@otomia-rh.com",
+          "website": "",
+          "publisher": "OTOMIA RH SARL",
+          "billing_department": "Facturation",
+          "hr_department": "Ressources Humaines",
+          "payroll_department": "Service Paie",
+          "hr_manager_name": "Responsable RH",
+          "payroll_manager_name": "Responsable Paie",
+          "director_name": "Directeur Général",
+          "logo": "",
+          "logo_url": "",
+          "logo_max_size_mb": "2.0",
+          "bulletin_title": "BULLETIN DE PAIE",
+          "bulletin_prefix": "BULLETIN DE PAIE N°",
+          "bulletin_number_format": "BP-{year}-{num:04d}",
+          "bulletin_footer": "Document généré automatiquement par OTOMIA RH.",
+          "bulletin_qr_enabled": true,
+          "bulletin_signature_enabled": true,
+          "bulletin_stamp_enabled": true,
+          "report_title": "RAPPORT RH",
+          "report_subtitle": "Rapport statistique des ressources humaines",
+          "report_header": "",
+          "report_footer": "Document confidentiel",
+          "report_author": "Administrateur RH",
+          "report_number_format": "RPT-{year}-{num:04d}",
+          "report_logo_enabled": true,
+          "address": "Avenue du Commerce, Gombe, Kinshasa, RDC",
+          "cnss_affiliation": "CNSS-001234567",
+          "phone": "+243 81 000 00 00",
+          "logo_text": "OTOMIA RH",
+          "created_at": "2026-06-06T13:58:30.006Z",
+          "updated_at": "2026-06-06T13:58:30.033Z"
+        }
+      }
+    ],
+    "hr_app.systemsettings": [
+      {
+        "model": "hr_app.systemsettings",
+        "pk": 1,
+        "fields": {
+          "default_currency": "USD",
+          "date_format": "DD/MM/YYYY",
+          "timezone": "Africa/Kinshasa",
+          "language": "fr",
+          "export_format": "pdf",
+          "system_version": "OTOMIA RH 2026.1",
+          "updated_at": "2026-06-06T15:25:08.028Z"
+        }
+      }
+    ],
+    "hr_app.role": [
+      {
+        "model": "hr_app.role",
+        "pk": 1,
+        "fields": {
+          "code": "ADMIN_RH",
+          "name": "Administrateur RH",
+          "description": "Accès total au système",
+          "permissions": {}
+        }
+      },
+      {
+        "model": "hr_app.role",
+        "pk": 2,
+        "fields": {
+          "code": "GESTIONNAIRE_RH",
+          "name": "Gestionnaire RH / Paie",
+          "description": "Gestion employés et paie",
+          "permissions": {}
+        }
+      },
+      {
+        "model": "hr_app.role",
+        "pk": 3,
+        "fields": {
+          "code": "RESPONSABLE_HIERARCHIQUE",
+          "name": "Responsable Hiérarchique",
+          "description": "Validation congés et évaluations",
+          "permissions": {}
+        }
+      },
+      {
+        "model": "hr_app.role",
+        "pk": 4,
+        "fields": {
+          "code": "EMPLOYE",
+          "name": "Employé",
+          "description": "Accès portail employé",
+          "permissions": {}
+        }
+      },
+      {
+        "model": "hr_app.role",
+        "pk": 5,
+        "fields": {
+          "code": "SUPER_ADMIN",
+          "name": "Super Administrateur",
+          "description": "Contrôle total",
+          "permissions": {}
+        }
+      },
+      {
+        "model": "hr_app.role",
+        "pk": 6,
+        "fields": {
+          "code": "GESTIONNAIRE_PAIE",
+          "name": "Gestionnaire Paie",
+          "description": "Paie et bulletins",
+          "permissions": {}
+        }
+      }
+    ],
+    "hr_app.appmodule": [
+      {
+        "model": "hr_app.appmodule",
+        "pk": 1,
+        "fields": {
+          "key": "dashboard",
+          "name": "Tableau de bord",
+          "description": "Vue synthétique des indicateurs RH",
+          "icon": "fa-home",
+          "is_active": true,
+          "display_order": 1,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 2,
+        "fields": {
+          "key": "admin-personnel",
+          "name": "Admin. Personnel",
+          "description": "Gestion administrative des employés",
+          "icon": "fa-users-cog",
+          "is_active": true,
+          "display_order": 2,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 3,
+        "fields": {
+          "key": "paie",
+          "name": "Gestion de la Paie",
+          "description": "Calcul et bulletins de paie RDC",
+          "icon": "fa-money-bill-wave",
+          "is_active": true,
+          "display_order": 3,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 4,
+        "fields": {
+          "key": "presences",
+          "name": "Présences & Congés",
+          "description": "Suivi des présences et demandes de congés",
+          "icon": "fa-calendar-check",
+          "is_active": true,
+          "display_order": 4,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE,EMPLOYE"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 5,
+        "fields": {
+          "key": "recrutement",
+          "name": "Recrutement",
+          "description": "Processus de recrutement et candidatures",
+          "icon": "fa-user-plus",
+          "is_active": true,
+          "display_order": 5,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 6,
+        "fields": {
+          "key": "formation",
+          "name": "Formation",
+          "description": "Plan de formation et certifications",
+          "icon": "fa-graduation-cap",
+          "is_active": true,
+          "display_order": 6,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 7,
+        "fields": {
+          "key": "performances",
+          "name": "Performances",
+          "description": "Évaluations et objectifs",
+          "icon": "fa-star",
+          "is_active": true,
+          "display_order": 7,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 8,
+        "fields": {
+          "key": "portail-employe",
+          "name": "Portail Employé",
+          "description": "Espace personnel de l'employé",
+          "icon": "fa-user-circle",
+          "is_active": true,
+          "display_order": 8,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH,EMPLOYE"
+        }
+      },
+      {
+        "model": "hr_app.appmodule",
+        "pk": 9,
+        "fields": {
+          "key": "reporting",
+          "name": "Reporting & Statistiques",
+          "description": "Rapports et exports RH",
+          "icon": "fa-chart-pie",
+          "is_active": true,
+          "display_order": 9,
+          "allowed_roles": "ADMIN_RH,GESTIONNAIRE_RH"
+        }
+      }
+    ],
+    "hr_app.modulefeature": [
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 15,
+        "fields": {
+          "module": 3,
+          "feature_key": "avances_salaire",
+          "feature_name": "Avances",
+          "description": "Avances sur salaire",
+          "feature_type": "payroll_retention",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 0
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 34,
+        "fields": {
+          "module": 6,
+          "feature_key": "interne",
+          "feature_name": "Formation interne",
+          "description": "Formation dispensée en interne",
+          "feature_type": "training_type",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 0
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 1,
+        "fields": {
+          "module": 3,
+          "feature_key": "salary_base",
+          "feature_name": "Salaire de base",
+          "description": "Rémunération mensuelle de base",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 0
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 21,
+        "fields": {
+          "module": 8,
+          "feature_key": "dashboard",
+          "feature_name": "Tableau de bord",
+          "description": "Vue synthétique personnelle",
+          "feature_type": "portal_section",
+          "icon": "fa-chart-line",
+          "config": {},
+          "is_active": true,
+          "display_order": 0
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 30,
+        "fields": {
+          "module": 5,
+          "feature_key": "test_technique",
+          "feature_name": "Test technique",
+          "description": "Évaluation des compétences techniques",
+          "feature_type": "recruitment_step",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 0
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 31,
+        "fields": {
+          "module": 5,
+          "feature_key": "entretien_rh",
+          "feature_name": "Entretien RH",
+          "description": "Entretien avec le service RH",
+          "feature_type": "recruitment_step",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 1
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 35,
+        "fields": {
+          "module": 6,
+          "feature_key": "externe",
+          "feature_name": "Formation externe",
+          "description": "Formation dispensée par un organisme externe",
+          "feature_type": "training_type",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 1
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 22,
+        "fields": {
+          "module": 8,
+          "feature_key": "profil",
+          "feature_name": "Mon Profil",
+          "description": "Informations personnelles et professionnelles",
+          "feature_type": "portal_section",
+          "icon": "fa-user",
+          "config": {},
+          "is_active": true,
+          "display_order": 1
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 16,
+        "fields": {
+          "module": 3,
+          "feature_key": "prets_internes",
+          "feature_name": "Prêts internes",
+          "description": "Remboursement prêts internes",
+          "feature_type": "payroll_retention",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 1
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 2,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_fonction",
+          "feature_name": "Prime fonction",
+          "description": "Prime liée à la fonction occupée",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 1
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 17,
+        "fields": {
+          "module": 3,
+          "feature_key": "absences_non_justifiees",
+          "feature_name": "Absences NJ",
+          "description": "Retenue pour absences non justifiées",
+          "feature_type": "payroll_retention",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 2
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 36,
+        "fields": {
+          "module": 6,
+          "feature_key": "certification",
+          "feature_name": "Certification",
+          "description": "Programme de certification professionnelle",
+          "feature_type": "training_type",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 2
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 32,
+        "fields": {
+          "module": 5,
+          "feature_key": "entretien_direction",
+          "feature_name": "Entretien Direction",
+          "description": "Entretien avec la direction",
+          "feature_type": "recruitment_step",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 2
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 23,
+        "fields": {
+          "module": 8,
+          "feature_key": "bulletins",
+          "feature_name": "Mes Bulletins",
+          "description": "Historique des bulletins de paie",
+          "feature_type": "portal_section",
+          "icon": "fa-file-invoice-dollar",
+          "config": {},
+          "is_active": true,
+          "display_order": 2
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 3,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_responsabilite",
+          "feature_name": "Prime responsabilité",
+          "description": "Prime de responsabilité hiérarchique",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 2
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 24,
+        "fields": {
+          "module": 8,
+          "feature_key": "conges",
+          "feature_name": "Mes Congés",
+          "description": "Demandes et solde de congés",
+          "feature_type": "portal_section",
+          "icon": "fa-umbrella-beach",
+          "config": {},
+          "is_active": true,
+          "display_order": 3
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 37,
+        "fields": {
+          "module": 6,
+          "feature_key": "competence",
+          "feature_name": "Niveau de compétence",
+          "description": "Évaluation du niveau de compétence",
+          "feature_type": "training_type",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 3
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 4,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_rendement",
+          "feature_name": "Prime rendement",
+          "description": "Prime basée sur le rendement",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 3
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 18,
+        "fields": {
+          "module": 3,
+          "feature_key": "retenues_disciplinaires",
+          "feature_name": "Retenues disc.",
+          "description": "Retenues disciplinaires",
+          "feature_type": "payroll_retention",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 3
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 33,
+        "fields": {
+          "module": 5,
+          "feature_key": "verification_references",
+          "feature_name": "Vérification des références",
+          "description": "Contrôle des références professionnelles",
+          "feature_type": "recruitment_step",
+          "icon": "",
+          "config": {},
+          "is_active": true,
+          "display_order": 3
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 19,
+        "fields": {
+          "module": 3,
+          "feature_key": "cotisations_syndicales",
+          "feature_name": "Cotisations synd.",
+          "description": "Cotisations syndicales",
+          "feature_type": "payroll_retention",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 4
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 25,
+        "fields": {
+          "module": 8,
+          "feature_key": "presences",
+          "feature_name": "Mes Présences",
+          "description": "Présences et missions",
+          "feature_type": "portal_section",
+          "icon": "fa-clock",
+          "config": {},
+          "is_active": true,
+          "display_order": 4
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 5,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_risque",
+          "feature_name": "Prime risque",
+          "description": "Prime de risque professionnel",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 4
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 20,
+        "fields": {
+          "module": 3,
+          "feature_key": "autres_retenues",
+          "feature_name": "Autres retenues",
+          "description": "Autres retenues diverses",
+          "feature_type": "payroll_retention",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 5
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 26,
+        "fields": {
+          "module": 8,
+          "feature_key": "evaluations",
+          "feature_name": "Évaluations",
+          "description": "Évaluations de performance",
+          "feature_type": "portal_section",
+          "icon": "fa-star",
+          "config": {},
+          "is_active": true,
+          "display_order": 5
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 6,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_transport",
+          "feature_name": "Prime transport",
+          "description": "Indemnité de transport",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 5
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 27,
+        "fields": {
+          "module": 8,
+          "feature_key": "formations",
+          "feature_name": "Formations",
+          "description": "Formations et certifications",
+          "feature_type": "portal_section",
+          "icon": "fa-graduation-cap",
+          "config": {},
+          "is_active": true,
+          "display_order": 6
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 7,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_logement",
+          "feature_name": "Prime logement",
+          "description": "Indemnité de logement",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 6
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 28,
+        "fields": {
+          "module": 8,
+          "feature_key": "documents",
+          "feature_name": "Documents RH",
+          "description": "Documents administratifs",
+          "feature_type": "portal_section",
+          "icon": "fa-folder-open",
+          "config": {},
+          "is_active": true,
+          "display_order": 7
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 8,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_communication",
+          "feature_name": "Prime communication",
+          "description": "Indemnité de communication",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 7
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 29,
+        "fields": {
+          "module": 8,
+          "feature_key": "notifications",
+          "feature_name": "Notifications",
+          "description": "Alertes et notifications",
+          "feature_type": "portal_section",
+          "icon": "fa-bell",
+          "config": {},
+          "is_active": true,
+          "display_order": 8
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 9,
+        "fields": {
+          "module": 3,
+          "feature_key": "prime_anciennete",
+          "feature_name": "Prime ancienneté",
+          "description": "Prime calculée selon l'ancienneté",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 8
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 10,
+        "fields": {
+          "module": 3,
+          "feature_key": "heures_supplementaires",
+          "feature_name": "Heures sup.",
+          "description": "Heures supplémentaires",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 9
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 11,
+        "fields": {
+          "module": 3,
+          "feature_key": "gratifications",
+          "feature_name": "Gratifications",
+          "description": "Gratifications exceptionnelles",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 10
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 12,
+        "fields": {
+          "module": 3,
+          "feature_key": "bonus_exceptionnel",
+          "feature_name": "Bonus",
+          "description": "Bonus exceptionnel",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 11
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 13,
+        "fields": {
+          "module": 3,
+          "feature_key": "avantages_nature",
+          "feature_name": "Avantages nature",
+          "description": "Avantages en nature",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 12
+        }
+      },
+      {
+        "model": "hr_app.modulefeature",
+        "pk": 14,
+        "fields": {
+          "module": 3,
+          "feature_key": "autres_indemnites",
+          "feature_name": "Autres indemnités",
+          "description": "Autres indemnités diverses",
+          "feature_type": "payroll_gain",
+          "icon": "",
+          "config": {
+            "formula": "manual"
+          },
+          "is_active": true,
+          "display_order": 13
+        }
+      }
+    ],
+    "hr_app.customfield": [
+      {
+        "model": "hr_app.customfield",
+        "pk": 1,
+        "fields": {
+          "module": 2,
+          "field_key": "cnss_number",
+          "field_name": "Numéro CNSS",
+          "field_type": "text",
+          "description": "Numéro d'affiliation CNSS",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [],
+          "display_order": 0
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 2,
+        "fields": {
+          "module": 2,
+          "field_key": "fiscal_number",
+          "field_name": "Numéro identification fiscale",
+          "field_type": "text",
+          "description": "Numéro fiscal de l'employé",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [],
+          "display_order": 1
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 3,
+        "fields": {
+          "module": 2,
+          "field_key": "internal_id",
+          "field_name": "N° identification interne",
+          "field_type": "text",
+          "description": "Identifiant interne de l'entreprise",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [],
+          "display_order": 2
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 4,
+        "fields": {
+          "module": 2,
+          "field_key": "blood_group",
+          "field_name": "Groupe sanguin",
+          "field_type": "select",
+          "description": "Groupe sanguin de l'employé",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [
+            "A+",
+            "A-",
+            "B+",
+            "B-",
+            "AB+",
+            "AB-",
+            "O+",
+            "O-"
+          ],
+          "display_order": 3
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 5,
+        "fields": {
+          "module": 2,
+          "field_key": "emergency_contact_name",
+          "field_name": "Personne à contacter (urgence)",
+          "field_type": "text",
+          "description": "Contact en cas d'urgence",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [],
+          "display_order": 4
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 6,
+        "fields": {
+          "module": 2,
+          "field_key": "emergency_contact_phone",
+          "field_name": "Téléphone urgence",
+          "field_type": "phone",
+          "description": "Numéro du contact d'urgence",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [],
+          "display_order": 5
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 7,
+        "fields": {
+          "module": 2,
+          "field_key": "nationality",
+          "field_name": "Nationalité",
+          "field_type": "text",
+          "description": "Nationalité de l'employé",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "Congolaise",
+          "options": [],
+          "display_order": 6
+        }
+      },
+      {
+        "model": "hr_app.customfield",
+        "pk": 8,
+        "fields": {
+          "module": 2,
+          "field_key": "origin_province",
+          "field_name": "Province d'origine",
+          "field_type": "text",
+          "description": "Province d'origine de l'employé",
+          "required": false,
+          "visible": true,
+          "editable": true,
+          "default_value": "",
+          "options": [],
+          "display_order": 7
+        }
+      }
+    ]
+  }
+}

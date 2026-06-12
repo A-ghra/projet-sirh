@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 12mm; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; color: #2c3e50; line-height: 1.35; }
+        .header { display: flex; gap: 14px; border-bottom: 3px solid #1a5f9e; padding-bottom: 10px; margin-bottom: 10px; }
+        .header-logo { width: 70px; text-align: center; }
+        .header-logo img { max-height: 55px; max-width: 65px; }
+        .header-info { flex: 1; }
+        .header-info h1 { color: #1a5f9e; margin: 0; font-size: 20px; letter-spacing: 2px; }
+        .header-info .slogan { color: #7f8c8d; font-size: 8px; margin: 2px 0; }
+        .header-info .company { font-weight: bold; font-size: 11px; }
+        .header-info .addr { font-size: 8.5px; color: #555; margin-top: 4px; }
+        .header-qr { width: 72px; text-align: center; }
+        .header-qr img { width: 68px; height: 68px; }
+        .header-qr small { font-size: 7px; color: #888; display: block; margin-top: 2px; }
+        .doc-id { background: #1a5f9e; color: white; text-align: center; padding: 7px; margin: 8px 0; border-radius: 4px; }
+        .doc-id h2 { margin: 0; font-size: 14px; letter-spacing: 2px; }
+        .doc-id .meta { font-size: 8.5px; margin-top: 3px; opacity: 0.9; }
+        .grid-2 { display: flex; gap: 10px; margin-bottom: 10px; }
+        .box { flex: 1; border: 1px solid #d5e6f7; border-radius: 5px; padding: 8px; background: #f8fbff; }
+        .box h3 { color: #1a5f9e; margin: 0 0 6px; font-size: 9.5px; border-bottom: 1px solid #d5e6f7; padding-bottom: 3px; text-transform: uppercase; }
+        .box p { margin: 2px 0; font-size: 9px; }
+        .emp-photo { width: 48px; height: 48px; border-radius: 50%; border: 2px solid #1a5f9e; object-fit: cover; float: right; margin-left: 6px; }
+        .period-bar { background: #eaf4ff; padding: 7px 10px; border-radius: 5px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 9px; }
+        .period-bar strong { color: #1a5f9e; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+        th { background: #1a5f9e; color: white; padding: 5px 8px; text-align: left; font-size: 9px; }
+        td { border: 1px solid #d5e6f7; padding: 4px 8px; font-size: 9px; }
+        .amount { text-align: right; font-family: 'Courier New', monospace; white-space: nowrap; }
+        .subtotal td { background: #eaf4ff; font-weight: bold; }
+        .tables-row { display: flex; gap: 10px; }
+        .tables-row > div { flex: 1; }
+        .recap { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+        .recap-item { flex: 1; min-width: 80px; text-align: center; border: 1px solid #d5e6f7; padding: 6px; border-radius: 5px; background: #fff; }
+        .recap-item small { display: block; color: #7f8c8d; font-size: 7.5px; margin-bottom: 2px; }
+        .recap-item strong { color: #1a5f9e; font-size: 11px; }
+        .net-box { background: #1a5f9e; color: white; border: 2px solid #0d4a7a; border-radius: 6px; padding: 10px; text-align: center; margin: 10px 0; }
+        .net-box small { font-size: 9px; letter-spacing: 1px; }
+        .net-box .net-amount { font-size: 22px; font-weight: bold; margin-top: 4px; letter-spacing: 1px; }
+        .history-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .history-row .box { flex: 1; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 14px; gap: 10px; }
+        .sig-box { flex: 1; border: 1px dashed #bbb; border-radius: 5px; padding: 10px; text-align: center; min-height: 65px; font-size: 8.5px; }
+        .sig-box .role { color: #1a5f9e; font-weight: bold; margin-bottom: 4px; }
+        .sig-line { border-top: 1px solid #999; margin-top: 28px; padding-top: 4px; }
+        .stamp { text-align: center; margin-top: 8px; font-size: 8px; color: #888; border: 2px double #ccc; display: inline-block; padding: 6px 14px; border-radius: 4px; }
+        .footer { margin-top: 12px; text-align: center; font-size: 7.5px; color: #95a5a6; border-top: 1px solid #eee; padding-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-logo">
+            {% if logo_uri %}<img src="{{ logo_uri }}" alt="Logo">{% endif %}
+        </div>
+        <div class="header-info">
+            <h1>{{ brand_name }}</h1>
+            <div class="slogan">{{ brand_slogan }}</div>
+            <div class="company">{{ company.company_name }}</div>
+            <div class="addr">
+                {% if company.postal_address %}{{ company.postal_address }} — {% endif %}
+                {{ company.headquarters_address }}<br>
+                {{ company.commune }}, {{ company.city }}, {{ company.province }}, {{ company.country }}<br>
+                Tél : {{ company.phone_primary }}{% if company.phone_secondary %} / {{ company.phone_secondary }}{% endif %}
+                — {{ company.email }}<br>
+                {{ legal_line }}
+            </div>
+        </div>
+        {% if show_qr %}
+        <div class="header-qr">
+            <img src="{{ qr_uri }}" alt="QR">
+            <small>Vérification</small>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="doc-id">
+        <h2>{{ bulletin_title }}</h2>
+        <div class="meta">
+            N° <strong>{{ bulletin_number }}</strong> &nbsp;|&nbsp;
+            Période : <strong>{{ month_label }} {{ year_label }}</strong> &nbsp;|&nbsp;
+            Devise : <strong>{{ currency }}</strong> ({{ currency_label }}) &nbsp;|&nbsp;
+            Émis le : <strong>{{ issued_at|date:"d/m/Y H:i" }}</strong>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="box">
+            <h3>Informations Employeur</h3>
+            <p><strong>{{ company.company_name }}</strong> ({{ company.company_acronym }})</p>
+            <p>{{ company.headquarters_address }}</p>
+            <p>RCCM : {{ company.rccm }} | ID. NAT : {{ company.id_nat }}</p>
+            <p>N° Impôt : {{ company.tax_number|default:"-" }} | CNSS : {{ company.cnss_number }}</p>
+            <p>{{ company.hr_department }} — {{ company.payroll_department }}</p>
+        </div>
+        <div class="box">
+            <h3>Informations Employé</h3>
+            {% if photo_uri %}<img class="emp-photo" src="{{ photo_uri }}" alt="Photo">{% endif %}
+            <p><strong>Matricule :</strong> {{ employee.matricule }}</p>
+            <p><strong>Nom :</strong> {{ employee.nom|default:employee.full_name }} |
+               <strong>Postnom :</strong> {{ employee.postnom|default:"-" }} |
+               <strong>Prénom :</strong> {{ employee.prenom|default:"-" }}</p>
+            <p><strong>Sexe :</strong> {{ employee.get_gender_display }} |
+               <strong>Contrat :</strong> {{ employee.contract_type }}</p>
+            <p><strong>Fonction :</strong> {{ employee.position }} |
+               <strong>Grade :</strong> {{ employee.grade|default:"-" }}</p>
+            <p><strong>Département :</strong> {{ department }} |
+               <strong>Direction :</strong> {{ direction }}</p>
+            <p><strong>Embauche :</strong> {{ employee.hire_date|date:"d/m/Y" }} |
+               <strong>Ancienneté :</strong> {{ seniority_years }} ans</p>
+            <p><strong>N° CNSS :</strong> {{ employee.cnss_number|default:"-" }} |
+               <strong>N° Fiscal :</strong> {{ employee.fiscal_number|default:"-" }}</p>
+        </div>
+    </div>
+
+    <div class="period-bar">
+        <span><strong>Mois :</strong> {{ month_label }} {{ year_label }}</span>
+        <span><strong>Devise :</strong> {{ currency }}</span>
+        <span><strong>Émis le :</strong> {{ issued_at|date:"d/m/Y H:i" }}</span>
+    </div>
+
+    <div class="history-row">
+        <div class="box">
+            <h3>Temps de Travail</h3>
+            <p><strong>Jours ouvrables :</strong> {{ payroll.days_working }}</p>
+            <p><strong>Jours travaillés :</strong> {{ payroll.days_worked }}</p>
+            <p><strong>Jours d'absence :</strong> {{ payroll.days_absent }}</p>
+            <p><strong>Jours de congé :</strong> {{ payroll.days_leave }}</p>
+            <p><strong>Jours de mission :</strong> {{ days_mission }}</p>
+            <p><strong>Heures normales :</strong> {{ hours_normal|floatformat:2 }} h</p>
+            <p><strong>Heures supplémentaires :</strong> {{ payroll.overtime_hours|floatformat:2 }} h</p>
+            <p><strong>Retards cumulés :</strong> {{ late_minutes }} min ({{ absence_late }} occurrence(s))</p>
+            <p><strong>Taux horaire :</strong> {{ hourly_rate|floatformat:2 }} {{ currency }}</p>
+            <p><strong>Taux de présence :</strong> {{ presence_rate|floatformat:1 }} %</p>
+        </div>
+        <div class="box">
+            <h3>Récapitulatif Paie</h3>
+            <p>Salaire de base : <strong>{{ payroll.salary_base|floatformat:2 }} {{ currency }}</strong></p>
+            <p>+ Primes &amp; HS : <strong>{{ payroll.total_primes|floatformat:2 }} {{ currency }}</strong></p>
+            <p>+ Indemnités : <strong>{{ payroll.total_indemnites|floatformat:2 }} {{ currency }}</strong></p>
+            <p>= Salaire brut : <strong>{{ payroll.gross_salary|floatformat:2 }} {{ currency }}</strong></p>
+            <p>- Retenues sociales : <strong>{{ social_deductions|floatformat:2 }} {{ currency }}</strong></p>
+            <p>- Retenues absences : <strong>{{ payroll.absences_non_justifiees|floatformat:2 }} {{ currency }}</strong></p>
+            <p>- Retenues retards : <strong>{{ payroll.retenues_retards|floatformat:2 }} {{ currency }}</strong></p>
+            <p>= <strong>NET À PAYER : {{ payroll.net_salary|floatformat:2 }} {{ currency }}</strong></p>
+        </div>
+    </div>
+
+    <div class="tables-row">
+        <div>
+            <table>
+                <thead><tr><th colspan="2">GAINS / RÉMUNÉRATION</th></tr>
+                <tr><th>Libellé</th><th>Montant ({{ currency }})</th></tr></thead>
+                <tbody>
+                    {% for label, value in gains %}
+                    <tr><td>{{ label }}</td><td class="amount">{{ value|floatformat:2 }}</td></tr>
+                    {% endfor %}
+                    <tr class="subtotal"><td>Sous-total Gains (Brut)</td><td class="amount">{{ payroll.gross_salary|floatformat:2 }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <table>
+                <thead><tr><th colspan="2">RETENUES</th></tr>
+                <tr><th>Libellé</th><th>Montant ({{ currency }})</th></tr></thead>
+                <tbody>
+                    {% for label, value in retenues %}
+                    <tr><td>{{ label }}</td><td class="amount">{{ value|floatformat:2 }}</td></tr>
+                    {% endfor %}
+                    <tr class="subtotal"><td>Sous-total Retenues</td><td class="amount">{{ payroll.total_retenues|floatformat:2 }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="recap">
+        <div class="recap-item"><small>Salaire de base</small><strong>{{ payroll.salary_base|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>Total primes</small><strong>{{ payroll.total_primes|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>Total indemnités</small><strong>{{ payroll.total_indemnites|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>Salaire brut</small><strong>{{ payroll.gross_salary|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>Salaire imposable</small><strong>{{ payroll.taxable_salary|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>CNSS</small><strong>{{ payroll.cnss_salarie|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>IPR / IRPP</small><strong>{{ payroll.irpp|floatformat:2 }}</strong></div>
+        <div class="recap-item"><small>Total retenues</small><strong>{{ payroll.total_retenues|floatformat:2 }}</strong></div>
+    </div>
+
+    <div class="net-box">
+        <small>NET À PAYER</small>
+        <div class="net-amount">{{ payroll.net_salary|floatformat:2 }} {{ currency }}</div>
+    </div>
+
+    <div class="history-row">
+        <div class="box">
+            <h3>Historique des Congés</h3>
+            <p><strong>Solde précédent :</strong> {{ leave_previous }} jour(s)</p>
+            <p><strong>Congés pris :</strong> {{ leave_taken }} jour(s)</p>
+            <p><strong>Solde actuel :</strong> {{ leave_current }} jour(s)</p>
+        </div>
+        <div class="box">
+            <h3>Historique des Absences</h3>
+            <p><strong>Retards :</strong> {{ absence_late }}</p>
+            <p><strong>Absences justifiées :</strong> {{ absence_justified }} jour(s)</p>
+            <p><strong>Absences non justifiées :</strong> {{ absence_unjustified }} jour(s)</p>
+        </div>
+    </div>
+
+    {% if show_signature %}
+    <div class="signatures">
+        <div class="sig-box">
+            <div class="role">Responsable RH</div>
+            <p><strong>{{ hr_manager_name }}</strong></p>
+            <p>{{ hr_department }}</p>
+            <p>Validé le : <strong>{{ validated_at|date:"d/m/Y H:i" }}</strong></p>
+            <div class="sig-line">Signature numérique RH — {{ validated_by_name }}</div>
+        </div>
+        <div class="sig-box">
+            <div class="role">Directeur Général</div>
+            <p><strong>{{ director_name }}</strong></p>
+            <p>Direction Générale</p>
+            <p>Date validation : <strong>{{ validated_at|date:"d/m/Y" }}</strong></p>
+            <div class="sig-line">Signature numérique Direction</div>
+        </div>
+    </div>
+    {% endif %}
+    {% if show_stamp %}
+    <div style="text-align:center;margin-top:6px;">
+        <span class="stamp">CACHET NUMÉRIQUE — {{ company.company_acronym }}</span>
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        Document généré par <strong>OTOMIA RH</strong> — {{ issued_at|date:"d/m/Y H:i" }}<br>
+        Généré par : {{ generated_by_name }} | Version : {{ system_version }}<br>
+        Hash vérification : {{ verification_hash|slice:":20" }}... | {{ bulletin_footer }}<br>
+        {{ company.publisher }} — Document confidentiel<br>
+        <em>{{ developer_signature }}</em>
+    </div>
+</body>
+</html>
