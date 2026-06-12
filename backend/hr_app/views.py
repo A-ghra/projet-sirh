@@ -52,9 +52,10 @@ import logging
 logger = logging.getLogger(__name__)
 from .serializers import (
     RoleSerializer, CompanySettingsSerializer, DepartmentSerializer, PositionSerializer,
-    EmployeeSerializer, EmployeeMovementSerializer, ContractSerializer, PayrollSerializer,
+    EmployeeSerializer, EmployeeMovementSerializer, ContractSerializer, ContractAmendmentSerializer,
+    ContractTypeConfigSerializer, PayrollSerializer,
     PayrollCalculationLogSerializer, PayrollExportLogSerializer, AbsenceSerializer, AttendanceSerializer,
-    MissionSerializer, DocumentSerializer, NotificationSerializer,
+    MissionSerializer, MissionDocumentSerializer, DocumentSerializer, NotificationSerializer,
     RecruitmentSerializer, ApplicantSerializer,     TrainingSerializer,
     EmployeeTrainingResultSerializer, PerformanceReviewSerializer,
     SkillCategorySerializer, SkillSerializer, EmployeeSkillSerializer,
@@ -303,10 +304,296 @@ class EmployeeMovementViewSet(viewsets.ModelViewSet):
     permission_classes = [IsGestionnaireOrAdmin]
 
 
+class ContractTypeViewSet(viewsets.ModelViewSet):
+    from .models import ContractTypeConfig
+    queryset = ContractTypeConfig.objects.all()
+    serializer_class = ContractTypeConfigSerializer
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [IsAuthenticated()]
+        return [IsGestionnaireOrAdmin()]
+
+
 class ContractViewSet(viewsets.ModelViewSet):
-    queryset = Contract.objects.all()
+    queryset = Contract.objects.select_related(
+        'employee', 'employee__department', 'employee__manager',
+    ).prefetch_related('amendments')
     serializer_class = ContractSerializer
-    permission_classes = [IsGestionnaireOrAdmin]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve', 'dashboard', 'export_contract', 'export_individual', 'types'):
+            return [IsAuthenticated()]
+        if self.action == 'sign_contract':
+            return [IsAuthenticated()]
+        if self.action == 'export_global':
+            return [IsGestionnaireOrAdmin()]
+        return [IsGestionnaireOrAdmin()]
+
+    def get_queryset(self):
+        from .contract_service import filter_contracts_for_user
+        qs = filter_contracts_for_user(self.request.user)
+        params = self.request.query_params
+        if params.get('contract_type'):
+            qs = qs.filter(contract_type=params['contract_type'])
+        if params.get('status'):
+            qs = qs.filter(status=params['status'])
+        if params.get('department'):
+            qs = qs.filter(employee__department_id=params['department'])
+        emp_id = params.get('employee') or params.get('employee_id')
+        if emp_id:
+            qs = qs.filter(employee_id=emp_id)
+        if params.get('year'):
+            qs = qs.filter(start_date__year=params['year'])
+        if params.get('month'):
+            try:
+                qs = qs.filter(start_date__month=int(params['month']))
+            except (TypeError, ValueError):
+                pass
+        if params.get('expiring'):
+            from datetime import timedelta
+            today = timezone.now().date()
+            qs = qs.filter(
+                is_active=True, end_date__isnull=False,
+                end_date__gte=today, end_date__lte=today + timedelta(days=90),
+            )
+        lifecycle = params.get('lifecycle')
+        if lifecycle:
+            from .contract_service import compute_lifecycle_status
+            today = timezone.now().date()
+            ids = [c.id for c in qs if compute_lifecycle_status(c, today) == lifecycle]
+            qs = qs.filter(id__in=ids)
+        search = params.get('search') or params.get('q')
+        if search:
+            qs = qs.filter(
+                Q(employee__full_name__icontains=search)
+                | Q(employee__matricule__icontains=search)
+                | Q(contract_number__icontains=search)
+                | Q(contract_type__icontains=search)
+            )
+        return qs.order_by('-start_date', '-id')
+
+    def perform_create(self, serializer):
+        from .contract_service import generate_contract_number, user_can_write_contract
+        from rest_framework.exceptions import PermissionDenied
+        if not user_can_write_contract(self.request.user):
+            raise PermissionDenied('Création non autorisée.')
+        emp = serializer.validated_data.get('employee')
+        if not serializer.validated_data.get('contract_number'):
+            serializer.validated_data['contract_number'] = generate_contract_number(emp)
+        if not serializer.validated_data.get('position_title') and emp:
+            serializer.validated_data['position_title'] = emp.position
+        obj = serializer.save(created_by=self.request.user, source='MANUAL')
+        from .contract_service import log_contract_archive
+        log_contract_archive(obj, 'CREATE', self.request.user, note='Création manuelle')
+        log_action(self.request.user, 'Création contrat', 'Contrats', obj.contract_number, self.request)
+
+    def perform_update(self, serializer):
+        from .contract_service import ensure_contract_editable, user_can_write_contract
+        from rest_framework.exceptions import PermissionDenied
+        if not user_can_write_contract(self.request.user, serializer.instance):
+            raise PermissionDenied('Modification non autorisée.')
+        ensure_contract_editable(serializer.instance)
+        old = serializer.instance.status
+        obj = serializer.save()
+        from .contract_service import log_contract_archive
+        log_contract_archive(obj, 'UPDATE', self.request.user, note=f'{old} → {obj.status}')
+        log_action(
+            self.request.user, 'Modification contrat', 'Contrats', obj.contract_number,
+            self.request, old_value=old, new_value=obj.status,
+        )
+
+    def perform_destroy(self, instance):
+        from .contract_service import user_can_delete_contract, log_contract_archive
+        from rest_framework.exceptions import PermissionDenied
+        if not user_can_delete_contract(self.request.user, instance):
+            raise PermissionDenied('Suppression non autorisée pour ce contrat.')
+        log_contract_archive(instance, 'DELETE', self.request.user)
+        log_action(self.request.user, 'Suppression contrat', 'Contrats', instance.contract_number, self.request)
+        instance.delete()
+
+    @action(detail=False, methods=['get'], url_path='dashboard')
+    def dashboard(self, request):
+        from .contract_service import build_contract_dashboard
+        qs = self.filter_queryset(self.get_queryset())
+        return Response(build_contract_dashboard(qs))
+
+    @action(detail=False, methods=['get'], url_path='types')
+    def types(self, request):
+        from .contract_service import get_active_contract_types
+        return Response(get_active_contract_types())
+
+    @action(detail=False, methods=['post'], url_path='import-contracts', parser_classes=[MultiPartParser, FormParser])
+    def import_contracts(self, request):
+        from .contract_import import import_from_csv, import_from_excel
+        f = request.FILES.get('file')
+        if not f:
+            return Response({'error': 'Fichier requis.'}, status=400)
+        name = f.name.lower()
+        if name.endswith('.csv'):
+            result = import_from_csv(f, user=request.user)
+        elif name.endswith(('.xlsx', '.xls')):
+            result = import_from_excel(f, user=request.user)
+        else:
+            return Response({'error': 'Format non supporté. Utilisez CSV ou XLSX.'}, status=400)
+        log_action(request.user, 'Import contrats', 'Contrats', f'{result["created"]} créé(s)', request)
+        return Response(result)
+
+    @action(detail=False, methods=['post'], url_path='import-document', parser_classes=[MultiPartParser, FormParser])
+    def import_document(self, request):
+        """Importe un document contrat (PDF, DOCX, image) pour un employé."""
+        from .contract_service import import_contract_document
+        from .models import Employee
+        f = request.FILES.get('file')
+        emp_id = request.data.get('employee')
+        if not f or not emp_id:
+            return Response({'error': 'Employé et fichier requis.'}, status=400)
+        name = f.name.lower()
+        allowed = ('.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png')
+        if not any(name.endswith(ext) for ext in allowed):
+            return Response({'error': 'Formats autorisés : PDF, DOCX, JPG, JPEG, PNG.'}, status=400)
+        employee = get_object_or_404(Employee, pk=emp_id)
+        contract = import_contract_document(
+            employee, f, request.user,
+            description=request.data.get('description', ''),
+            contract_type=request.data.get('contract_type', 'CDI'),
+            start_date=request.data.get('start_date') or None,
+        )
+        return Response(self.get_serializer(contract).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='export-individual')
+    def export_individual(self, request):
+        """Export d'un seul contrat (employé + contrat + format)."""
+        from .contract_export import contract_export_response
+        from .contract_service import filter_contracts_for_user
+        contract_id = request.query_params.get('contract_id')
+        emp_id = request.query_params.get('employee_id') or request.query_params.get('employee')
+        fmt = request.query_params.get('export_format') or request.query_params.get('format', 'pdf')
+        if not contract_id:
+            return Response({'error': 'Veuillez sélectionner un contrat.'}, status=400)
+        contract = get_object_or_404(
+            Contract.objects.select_related(
+                'employee', 'employee__department', 'employee__manager',
+            ),
+            pk=contract_id,
+        )
+        if emp_id and str(contract.employee_id) != str(emp_id):
+            return Response({'error': 'Le contrat ne correspond pas à l\'employé sélectionné.'}, status=400)
+        allowed = filter_contracts_for_user(request.user).filter(pk=contract.pk)
+        if not allowed.exists():
+            return Response({'error': 'Accès refusé à ce contrat.'}, status=403)
+        log_action(
+            request.user, 'Export individuel contrat', 'Contrats',
+            f'{contract.contract_number} — {fmt}', request,
+        )
+        return contract_export_response(contract, fmt, user=request.user, export_type='individual')
+
+    @action(detail=False, methods=['get'], url_path='export-global')
+    def export_global(self, request):
+        from .contract_export import export_global_response
+        qs = self.filter_queryset(self.get_queryset())
+        if not qs.exists():
+            return Response(
+                {'error': 'Aucun contrat disponible pour les critères sélectionnés.'},
+                status=404,
+            )
+        fmt = request.query_params.get('export_format') or request.query_params.get('format', 'xlsx')
+        try:
+            response = export_global_response(qs, fmt, user=request.user)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=400)
+        log_action(
+            request.user, 'Export global contrats', 'Contrats',
+            f'{qs.count()} contrat(s) — {fmt}', request,
+        )
+        return response
+
+    @action(detail=True, methods=['get'], url_path='archive-logs')
+    def archive_logs(self, request, pk=None):
+        from .models import ContractArchiveLog
+        contract = self.get_object()
+        logs = contract.archive_logs.select_related('user').all()[:50]
+        data = [{
+            'action': log.action,
+            'action_label': log.get_action_display(),
+            'user': log.user.username if log.user else '-',
+            'note': log.note,
+            'created_at': log.created_at.isoformat(),
+        } for log in logs]
+        return Response(data)
+
+    @action(detail=True, methods=['get'], url_path='export')
+    def export_contract(self, request, pk=None):
+        from .contract_export import contract_export_response
+        contract = self.get_object()
+        fmt = request.query_params.get('export_format') or request.query_params.get('format', 'pdf')
+        log_action(
+            request.user, 'Export contrat', 'Contrats',
+            f'{contract.contract_number} — {fmt}', request,
+        )
+        return contract_export_response(contract, fmt, user=request.user, export_type='individual')
+
+    @action(detail=True, methods=['post'], url_path='sign')
+    def sign_contract(self, request, pk=None):
+        from .contract_service import apply_contract_signatures
+        contract = self.get_object()
+        role = request.data.get('role', 'employee')
+        if role == 'employee':
+            emp = getattr(request.user.profile, 'employee', None)
+            if not emp or emp.id != contract.employee_id:
+                return Response({'error': 'Signature employé non autorisée.'}, status=403)
+        elif get_user_role(request.user) not in (ROLE_ADMIN, ROLE_GESTIONNAIRE):
+            return Response({'error': 'Signature RH/Direction réservée aux gestionnaires.'}, status=403)
+        contract = apply_contract_signatures(contract, role, request.data, request.user)
+        return Response(self.get_serializer(contract).data)
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel_contract(self, request, pk=None):
+        from .contract_service import cancel_contract
+        contract = self.get_object()
+        contract = cancel_contract(contract, request.user, request.data.get('reason', ''))
+        return Response(self.get_serializer(contract).data)
+
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive_contract(self, request, pk=None):
+        from .contract_service import archive_contract
+        contract = self.get_object()
+        contract = archive_contract(contract, request.user)
+        return Response(self.get_serializer(contract).data)
+
+    @action(detail=True, methods=['post'], url_path='renew')
+    def renew_contract(self, request, pk=None):
+        from .contract_service import renew_contract, generate_contract_number
+        old = self.get_object()
+        data = renew_contract(old, request.user, request.data)
+        serializer = self.get_serializer(data={
+            **data,
+            'contract_number': generate_contract_number(old.employee),
+            'contract_type': data.get('contract_type', old.contract_type),
+            'transport_allowance': old.transport_allowance,
+            'housing_allowance': old.housing_allowance,
+            'work_schedule': old.work_schedule,
+            'currency': old.currency,
+        })
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'], url_path='amendments')
+    def amendments(self, request, pk=None):
+        from .models import ContractAmendment
+        from .serializers import ContractAmendmentSerializer
+        contract = self.get_object()
+        if request.method == 'GET':
+            ser = ContractAmendmentSerializer(contract.amendments.all(), many=True)
+            return Response(ser.data)
+        num = request.data.get('amendment_number') or f'AVN-{contract.amendments.count() + 1:03d}'
+        ser = ContractAmendmentSerializer(data={**request.data, 'contract': contract.id, 'amendment_number': num})
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        log_action(request.user, 'Création avenant', 'Contrats', f'{contract.contract_number}/{num}', request)
+        return Response(ser.data, status=status.HTTP_201_CREATED)
 
 
 def _apply_payroll_calc(payroll, data, user=None):
@@ -499,16 +786,16 @@ class PayrollViewSet(viewsets.ModelViewSet):
 class AbsenceViewSet(viewsets.ModelViewSet):
     queryset = Absence.objects.all().select_related('employee')
     serializer_class = AbsenceSerializer
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         from .presence_service import filter_absence_queryset
         return filter_absence_queryset(self.request.user)
 
     def perform_create(self, serializer):
-        from .presence_service import LEAVE_FEATURE_TO_ABSENCE, map_leave_feature_key, get_user_employee
-        absence_type = serializer.validated_data.get('absence_type', '')
-        if absence_type in LEAVE_FEATURE_TO_ABSENCE or absence_type.startswith('conge_'):
-            serializer.validated_data['absence_type'] = map_leave_feature_key(absence_type)
+        from .presence_service import get_user_employee
+        if not serializer.validated_data.get('absence_type'):
+            serializer.validated_data['absence_type'] = 'CP'
         emp = get_user_employee(self.request.user)
         if get_user_role(self.request.user) == ROLE_EMPLOYE and emp:
             serializer.validated_data['employee'] = emp
@@ -721,7 +1008,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         absence_vs.request = request
         absence_vs.format_kwarg = None
         absence_vs.action = 'create'
-        serializer = AbsenceSerializer(data=request.data)
+        serializer = AbsenceSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         absence_vs.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -841,20 +1128,168 @@ class AttendanceViewSet(viewsets.ModelViewSet):
 
 
 class MissionViewSet(viewsets.ModelViewSet):
-    queryset = Mission.objects.all()
+    queryset = Mission.objects.select_related(
+        'employee', 'employee__department', 'employee__manager',
+    ).prefetch_related('documents')
     serializer_class = MissionSerializer
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_permissions(self):
+        from .mission_service import user_can_delete_mission
+        if self.action in ('list', 'retrieve', 'export_missions', 'audit_logs'):
+            return [IsAuthenticated()]
+        if self.action == 'destroy':
+            return [IsAuthenticated()]
+        if self.action in ('approve', 'start_mission', 'close_mission', 'cancel_mission'):
+            return [IsManagerOrAbove()]
+        return [IsManagerOrAbove()]
 
     def get_queryset(self):
-        from .presence_service import filter_mission_queryset
-        return filter_mission_queryset(self.request.user)
+        from .mission_service import filter_missions_queryset, apply_mission_filters
+        qs = filter_missions_queryset(self.request.user)
+        return apply_mission_filters(qs, self.request.query_params)
 
     def perform_create(self, serializer):
-        obj = serializer.save()
-        log_action(self.request.user, 'Création mission', 'Présences', obj.title, self.request)
+        from .mission_service import (
+            generate_mission_number, log_mission_action, user_can_write_mission,
+            sync_mission_attendance_markers,
+        )
+        from rest_framework.exceptions import PermissionDenied
+        emp = serializer.validated_data.get('employee')
+        if not user_can_write_mission(self.request.user, employee_id=emp.id if emp else None):
+            raise PermissionDenied('Création de mission non autorisée.')
+        if not serializer.validated_data.get('mission_number') and emp:
+            serializer.validated_data['mission_number'] = generate_mission_number(emp)
+        obj = serializer.save(created_by=self.request.user)
+        log_mission_action(obj, 'CREATE', self.request.user, obj.title)
+        log_action(self.request.user, 'Création mission', 'Présences', obj.mission_number, self.request)
 
     def perform_update(self, serializer):
+        from .mission_service import (
+            log_mission_action, user_can_write_mission, sync_mission_attendance_markers,
+            build_mission_update_audit_note,
+        )
+        from rest_framework.exceptions import PermissionDenied
+        if not user_can_write_mission(self.request.user, mission=serializer.instance):
+            raise PermissionDenied('Modification non autorisée.')
+        instance = serializer.instance
+        audit_note = build_mission_update_audit_note(instance, serializer.validated_data)
+        print("Mission mise à jour :", instance.id)
+        print(self.request.data)
         obj = serializer.save()
-        log_action(self.request.user, 'Modification mission', 'Présences', obj.title, self.request)
+        if obj.status in ('APPROVED', 'IN_PROGRESS', 'Approved'):
+            sync_mission_attendance_markers(obj)
+        log_mission_action(obj, 'UPDATE', self.request.user, audit_note)
+        log_action(self.request.user, 'Modification mission', 'Présences', obj.mission_number, self.request)
+
+    def perform_destroy(self, instance):
+        from .mission_service import log_mission_action, user_can_delete_mission
+        from rest_framework.exceptions import PermissionDenied
+        if not user_can_delete_mission(self.request.user, instance):
+            raise PermissionDenied('Seuls Admin RH et Gestionnaire RH peuvent supprimer une mission.')
+        log_mission_action(instance, 'DELETE', self.request.user, instance.title)
+        log_action(self.request.user, 'Suppression mission', 'Présences', instance.mission_number, self.request)
+        instance.delete()
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        from .mission_service import (
+            log_mission_action, sync_mission_attendance_markers, sync_mission_to_payroll, user_can_approve_mission,
+        )
+        from rest_framework.exceptions import PermissionDenied
+        if not user_can_approve_mission(request.user):
+            raise PermissionDenied('Validation non autorisée.')
+        mission = self.get_object()
+        mission.status = 'APPROVED'
+        mission.approved_by = request.user
+        mission.save(update_fields=['status', 'approved_by', 'updated_at'])
+        sync_mission_attendance_markers(mission)
+        sync_mission_to_payroll(mission)
+        log_mission_action(mission, 'APPROVE', request.user)
+        log_action(request.user, 'Validation mission', 'Présences', mission.mission_number, request)
+        return Response(self.get_serializer(mission).data)
+
+    @action(detail=True, methods=['post'], url_path='start')
+    def start_mission(self, request, pk=None):
+        from .mission_service import log_mission_action, sync_mission_attendance_markers
+        mission = self.get_object()
+        mission.status = 'IN_PROGRESS'
+        mission.save(update_fields=['status', 'updated_at'])
+        sync_mission_attendance_markers(mission)
+        log_mission_action(mission, 'START', request.user)
+        return Response(self.get_serializer(mission).data)
+
+    @action(detail=True, methods=['post'], url_path='close')
+    def close_mission(self, request, pk=None):
+        from .mission_service import log_mission_action, sync_mission_to_payroll
+        from django.utils import timezone as tz
+        mission = self.get_object()
+        for field in ('closure_summary', 'closure_results', 'closure_difficulties',
+                      'closure_recommendations', 'actual_expenses', 'comments'):
+            if field in request.data:
+                setattr(mission, field, request.data.get(field))
+        mission.status = 'COMPLETED'
+        mission.closed_at = tz.now()
+        mission.save()
+        sync_mission_to_payroll(mission)
+        log_mission_action(mission, 'CLOSE', request.user, request.data.get('closure_summary', ''))
+        log_action(request.user, 'Clôture mission', 'Présences', mission.mission_number, request)
+        return Response(self.get_serializer(mission).data)
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel_mission(self, request, pk=None):
+        from .mission_service import log_mission_action
+        mission = self.get_object()
+        mission.status = 'CANCELLED'
+        mission.save(update_fields=['status', 'updated_at'])
+        log_mission_action(mission, 'CANCEL', request.user)
+        return Response(self.get_serializer(mission).data)
+
+    @action(detail=True, methods=['post'], url_path='documents')
+    def upload_document(self, request, pk=None):
+        from .models import MissionDocument
+        mission = self.get_object()
+        f = request.FILES.get('file')
+        if not f:
+            return Response({'error': 'Fichier requis.'}, status=400)
+        name = f.name.lower()
+        if not any(name.endswith(ext) for ext in ('.pdf', '.jpg', '.jpeg', '.png', '.docx', '.doc')):
+            return Response({'error': 'Formats : PDF, JPG, PNG, DOCX.'}, status=400)
+        doc = MissionDocument.objects.create(
+            mission=mission,
+            file=f,
+            doc_type=request.data.get('doc_type', 'other'),
+            label=request.data.get('label', f.name),
+            uploaded_by=request.user,
+        )
+        from .mission_service import log_mission_action
+        log_mission_action(mission, 'UPDATE', request.user, f'Document: {doc.label}')
+        return Response(MissionDocumentSerializer(doc, context={'request': request}).data, status=201)
+
+    @action(detail=True, methods=['get'], url_path='audit-logs')
+    def audit_logs(self, request, pk=None):
+        mission = self.get_object()
+        logs = mission.audit_logs.select_related('user').all()[:50]
+        return Response([{
+            'action': log.action,
+            'action_label': log.get_action_display(),
+            'user': log.user.username if log.user else '-',
+            'note': log.note,
+            'created_at': log.created_at.isoformat(),
+        } for log in logs])
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_missions(self, request):
+        from .mission_export import mission_export_response
+        from .mission_service import log_mission_action
+        qs = self.filter_queryset(self.get_queryset())
+        if not qs.exists():
+            return Response({'error': 'Aucune mission pour les critères sélectionnés.'}, status=404)
+        fmt = request.query_params.get('export_format') or request.query_params.get('format', 'xlsx')
+        for m in qs[:20]:
+            log_mission_action(m, 'EXPORT', request.user, fmt)
+        log_action(request.user, 'Export missions', 'Présences', f'{qs.count()} mission(s)', request)
+        return mission_export_response(qs, fmt)
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
@@ -1332,6 +1767,9 @@ def employee_portal(request):
         'kpis': EmployeeKPISerializer(employee.kpis.all(), many=True).data,
         'attendances': AttendanceSerializer(attendances.order_by('-date')[:30], many=True).data,
         'missions': MissionSerializer(employee.missions.all().order_by('-start_date'), many=True).data,
+        'contracts': ContractSerializer(
+            employee.contracts.all().order_by('-start_date'), many=True, context={'request': request},
+        ).data,
         'notifications': NotificationSerializer(employee.notifications.filter(is_read=False)[:20], many=True).data,
         'leave_balance': float(employee.leave_balance),
         'attendance_summary': {

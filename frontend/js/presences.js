@@ -24,12 +24,17 @@
     };
     let _presEmployeesCache = [];
     const EVENT_CODES = { presence: "P", absence: "A", leave: "C", mission: "M", late: "R" };
-    const DEFAULT_LEAVE_TYPES = [
-        { feature_key: "conge_annuel", feature_name: "Congé annuel" },
-        { feature_key: "conge_maladie", feature_name: "Congé maladie" },
-        { feature_key: "conge_exceptionnel", feature_name: "Congé exceptionnel" },
-        { feature_key: "conge_sans_solde", feature_name: "Congé sans solde" },
-    ];
+    const MISSION_STATUS_LABELS = {
+        PENDING_APPROVAL: "En attente d'approbation",
+        APPROVED: "Approuvée",
+        IN_PROGRESS: "En cours",
+        COMPLETED: "Terminée",
+        CANCELLED: "Annulée",
+        Pending: "En attente d'approbation",
+        Approved: "Approuvée",
+        Rejected: "Annulée",
+        Completed: "Terminée",
+    };
     const MONTH_NAMES = Array.from({ length: 12 }, (_, i) =>
         new Date(2000, i, 1).toLocaleString("fr-FR", { month: "long" }));
 
@@ -99,7 +104,6 @@
         if (!contentArea) return;
 
         const dbTabs = getActiveFeatures("presences", "menu_tab");
-        const leaveTypes = getActiveFeatures("presences", "leave_type");
         const title = getModuleTitle("presences", "Présences & Congés");
         const canWrite = canWriteModule("presences");
         const defaultTabs = [
@@ -111,12 +115,15 @@
             { feature_key: "onglet_missions", feature_name: "Missions", icon: "fa-briefcase" },
             { feature_key: "onglet_absences_auto", feature_name: "Absences auto", icon: "fa-robot" },
         ];
-        const tabs = dbTabs.some((t) => t.feature_key === "onglet_pointage") ? dbTabs : defaultTabs;
+        const isLeaveTypesTab = (t) => {
+            const key = (t.feature_key || "").toLowerCase();
+            const name = (t.feature_name || "").toLowerCase();
+            return key === "onglet_types" || key.includes("types_cong") || name.includes("types de cong");
+        };
+        const rawTabs = dbTabs.some((t) => t.feature_key === "onglet_pointage") ? dbTabs : defaultTabs;
+        const tabs = rawTabs.filter((t) => !isLeaveTypesTab(t));
         const firstTabKey = (tabs[0]?.feature_key || "onglet_pointage").replace("onglet_", "");
         const tabsHtml = renderModuleTabsHtml(tabs, "pres-tabs");
-        const activeLeaveTypes = leaveTypes.length ? leaveTypes : DEFAULT_LEAVE_TYPES;
-        const leaveOptions = activeLeaveTypes.map((lt) =>
-            `<option value="${lt.feature_key}">${lt.feature_name}</option>`).join("");
         const f = presFilters();
 
         contentArea.innerHTML = `
@@ -184,13 +191,42 @@
                 </div>
 
                 <div class="module-tab-panel ${firstTabKey === "conges" ? "active" : ""}" id="pres-panel-conges">
-                    <table class="pres-table"><thead><tr><th>Employé</th><th>Type</th><th>Début</th><th>Fin</th><th>Statut</th><th>Actions</th></tr></thead>
+                    <table class="pres-table"><thead><tr><th>Employé</th><th>Début</th><th>Fin</th><th>Jours</th><th>Motif</th><th>Statut</th><th>Actions</th></tr></thead>
                     <tbody id="abs-list"></tbody></table>
                 </div>
 
                 <div class="module-tab-panel ${firstTabKey === "missions" ? "active" : ""}" id="pres-panel-missions">
-                    <table class="pres-table"><thead><tr><th>Employé</th><th>Titre</th><th>Destination</th><th>Période</th><th>Statut</th></tr></thead>
-                    <tbody id="miss-list"></tbody></table>
+                    <div class="action-bar">
+                        ${canWrite ? `<button class="btn btn-primary" onclick="window.openMissionForm()"><i class="fas fa-plus"></i> Nouvelle mission</button>` : ""}
+                        <div class="export-bar">
+                            <button class="btn btn-secondary" onclick="window.printMissionsList()"><i class="fas fa-print"></i> Imprimer</button>
+                            <button class="btn btn-secondary" onclick="window.exportMissions('pdf')"><i class="fas fa-file-pdf"></i> PDF</button>
+                            <button class="btn btn-secondary" onclick="window.exportMissions('xlsx')"><i class="fas fa-file-excel"></i> Excel</button>
+                            <button class="btn btn-secondary" onclick="window.exportMissions('docx')"><i class="fas fa-file-word"></i> Word</button>
+                        </div>
+                    </div>
+                    <div class="pres-filters action-bar">
+                        <input type="search" id="mission-search" class="filter-search" placeholder="🔍 Entrer votre recherche (nom, matricule, lieu, objet...)"
+                            oninput="window._missionSearch=this.value;loadMissionsPanel()">
+                        <label>Mois <select id="mission-filter-month" onchange="loadMissionsPanel()">${monthYearOptions(f.month, f.year).months}</select></label>
+                        <label>Année <select id="mission-filter-year" onchange="loadMissionsPanel()">${monthYearOptions(f.month, f.year).years}</select></label>
+                        <label>Département <select id="mission-filter-dept" onchange="loadMissionsPanel()"><option value="">Tous</option></select></label>
+                        <label>État <select id="mission-filter-status" onchange="loadMissionsPanel()">
+                            <option value="">Tous</option>
+                            <option value="PENDING_APPROVAL">En attente d'approbation</option>
+                            <option value="APPROVED">Approuvée</option>
+                            <option value="IN_PROGRESS">En cours</option>
+                            <option value="COMPLETED">Terminée</option>
+                            <option value="CANCELLED">Annulée</option>
+                        </select></label>
+                    </div>
+                    <div class="table-responsive" id="missions-print-area">
+                        <table class="pres-table"><thead><tr>
+                            <th>N°</th><th>Employé</th><th>Matricule</th><th>Département</th>
+                            <th>Objet</th><th>Lieu</th><th>Début</th><th>Fin</th><th>Jours</th><th>État</th><th>Actions</th>
+                        </tr></thead>
+                        <tbody id="miss-list"><tr><td colspan="11"><i class="fas fa-spinner fa-spin"></i> Chargement...</td></tr></tbody></table>
+                    </div>
                 </div>
 
                 <div class="module-tab-panel ${firstTabKey === "absences_auto" ? "active" : ""}" id="pres-panel-absences-auto">
@@ -209,17 +245,23 @@
                     <div id="pointage-modal-body"><p class="hint-text"><i class="fas fa-spinner fa-spin"></i> Chargement...</p></div>
                 </div>
             </div>
+            <div id="mission-modal" class="custom-modal" hidden>
+                <div class="custom-modal-content panel mission-modal-panel">
+                    <div id="mission-modal-body"></div>
+                </div>
+            </div>
             <div id="leave-modal" class="custom-modal" hidden>
                 <div class="custom-modal-content panel">
-                    <h3>Demande de congé</h3>
+                    <h3><i class="fas fa-umbrella-beach"></i> Demande de congé</h3>
                     <div class="form-row">
                         <div id="leave-employee-wrap" hidden><label>Employé <span class="req">*</span></label>
                             <select id="leave-employee"></select></div>
-                        <div><label>Type de congé <span class="req">*</span></label><select id="leave-type">${leaveOptions}</select></div>
-                        <div><label>Date début <span class="req">*</span></label><input type="date" id="leave-start"></div>
-                        <div><label>Date fin <span class="req">*</span></label><input type="date" id="leave-end"></div>
+                        <div><label>Date début <span class="req">*</span></label><input type="date" id="leave-start" onchange="window.updateLeaveDaysCount()"></div>
+                        <div><label>Date fin <span class="req">*</span></label><input type="date" id="leave-end" onchange="window.updateLeaveDaysCount()"></div>
+                        <div><label>Nombre de jours</label><input type="number" id="leave-days" readonly min="1" placeholder="—"></div>
                     </div>
                     <div><label>Motif / commentaire</label><textarea id="leave-reason" rows="2" placeholder="Motif de la demande"></textarea></div>
+                    <div><label>Pièce justificative (optionnelle)</label><input type="file" id="leave-justif" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"></div>
                     <div class="action-bar">
                         <button type="button" class="btn btn-primary" onclick="window.submitLeaveRequest()">Envoyer</button>
                         <button type="button" class="btn btn-secondary" onclick="window.closeLeaveModal()">Annuler</button>
@@ -234,7 +276,6 @@
             onglet_grille: "grille",
             onglet_conges: "conges",
             onglet_missions: "missions",
-            onglet_types: "types",
         };
         bindModuleTabs("pres-tabs", (key) => {
             document.querySelectorAll(".presences-module .module-tab-panel").forEach((p) => p.classList.remove("active"));
@@ -245,6 +286,7 @@
             if (panelKey === "recap") loadRecapPanel();
             if (panelKey === "presences") loadReportPanel();
             if (panelKey === "grille") loadGridPanel();
+            if (panelKey === "missions") loadMissionsPanel();
         });
 
         try {
@@ -482,13 +524,21 @@
     };
 
     async function refreshAllPresencesPanels() {
-        await Promise.allSettled([
+        const tasks = [
             loadPointagePanel(),
             loadRecapPanel(),
             loadReportPanel(),
             loadGridPanel(),
             loadAutoAbsencesPanel(),
-        ]);
+        ];
+        if (document.getElementById("miss-list")) tasks.push(loadMissionsPanel());
+        await Promise.allSettled(tasks);
+    }
+
+    async function refreshAfterMissionMutation(message) {
+        await loadMissionsPanel();
+        await refreshAllPresencesPanels();
+        await otomiaAfterMutation("presences", message);
     }
 
     function workflowBadge(status) {
@@ -742,6 +792,23 @@
             <div class="stat-card stat-animated"><i class="fas fa-hourglass-half"></i><div class="stat-info"><h3>Heures travaillées</h3><p>${p.hours_worked_month || 0} h</p></div></div>`;
     }
 
+    window.updateLeaveDaysCount = () => {
+        const start = document.getElementById("leave-start")?.value;
+        const end = document.getElementById("leave-end")?.value;
+        const daysEl = document.getElementById("leave-days");
+        if (!daysEl || !start || !end) {
+            if (daysEl) daysEl.value = "";
+            return;
+        }
+        if (end < start) {
+            daysEl.value = "";
+            return;
+        }
+        const s = new Date(start + "T12:00:00");
+        const e = new Date(end + "T12:00:00");
+        daysEl.value = Math.round((e - s) / 86400000) + 1;
+    };
+
     window.showLeaveRequestModal = async () => {
         const m = document.getElementById("leave-modal");
         if (!m) return;
@@ -758,6 +825,16 @@
         } else if (empWrap) {
             empWrap.hidden = true;
         }
+        const today = new Date().toISOString().slice(0, 10);
+        const startEl = document.getElementById("leave-start");
+        const endEl = document.getElementById("leave-end");
+        const reasonEl = document.getElementById("leave-reason");
+        const justifEl = document.getElementById("leave-justif");
+        if (startEl) startEl.value = today;
+        if (endEl) endEl.value = today;
+        if (reasonEl) reasonEl.value = "";
+        if (justifEl) justifEl.value = "";
+        window.updateLeaveDaysCount();
         m.hidden = false;
     };
     window.closeLeaveModal = () => {
@@ -770,18 +847,18 @@
         const empId = isRh && empSel && !empSel.closest("[hidden]")
             ? Number(empSel.value)
             : currentUser?.employee_id;
-        const typeKey = document.getElementById("leave-type")?.value;
         const start = document.getElementById("leave-start")?.value;
         const end = document.getElementById("leave-end")?.value;
         const reason = document.getElementById("leave-reason")?.value?.trim() || "";
+        const justifFile = document.getElementById("leave-justif")?.files?.[0];
         if (!empId) {
             const msg = "Veuillez sélectionner un employé ou lier votre profil employé.";
             if (typeof showToast === "function") showToast(msg, "error");
             else alert(msg);
             return;
         }
-        if (!typeKey || !start || !end) {
-            const msg = "Veuillez compléter tous les champs obligatoires.";
+        if (!start || !end) {
+            const msg = "Veuillez compléter les dates de congé.";
             if (typeof showToast === "function") showToast(msg, "error");
             else alert(msg);
             return;
@@ -792,10 +869,23 @@
             else alert(msg);
             return;
         }
-        const payload = { employee: empId, absence_type: typeKey, start_date: start, end_date: end, reason, status: "Pending" };
-        console.log("[OTOMIA] Données congé envoyées :", payload);
+        const fd = new FormData();
+        fd.append("employee", String(empId));
+        fd.append("start_date", start);
+        fd.append("end_date", end);
+        fd.append("reason", reason);
+        fd.append("status", "Pending");
+        fd.append("absence_type", "CP");
+        if (justifFile) fd.append("justification_file", justifFile);
+        console.log("[OTOMIA] Données congé envoyées :", { employee: empId, start_date: start, end_date: end, reason });
         try {
-            const response = await apiPost("/absences/leave-request/", payload);
+            const response = await apiFetch("/absences/leave-request/", { method: "POST", body: fd });
+            if (!response.ok) {
+                const err = typeof otomiaParseResponseBody === "function"
+                    ? await otomiaParseResponseBody(response)
+                    : null;
+                throw new Error(err?.error || err?.detail || `Erreur (${response.status})`);
+            }
             console.log("[OTOMIA] Réponse API congé :", response);
             closeLeaveModal();
             await otomiaAfterMutation("presences", "Demande de congé envoyée avec succès.");
@@ -847,6 +937,340 @@
         }
     };
 
+    function canDeleteMission() {
+        return ["SUPER_ADMIN", "ADMIN_RH", "GESTIONNAIRE_RH"].includes(currentUser?.role);
+    }
+
+    function missionStatusBadge(status) {
+        const label = MISSION_STATUS_LABELS[status] || status;
+        return `<span class="contract-lifecycle contract-lc-${(status || "").toLowerCase()}">${label}</span>`;
+    }
+
+    window.loadMissionsPanel = async function loadMissionsPanel() {
+        const tbody = document.getElementById("miss-list");
+        if (!tbody) return;
+        const params = new URLSearchParams();
+        const search = window._missionSearch || document.getElementById("mission-search")?.value;
+        const month = document.getElementById("mission-filter-month")?.value;
+        const year = document.getElementById("mission-filter-year")?.value;
+        const dept = document.getElementById("mission-filter-dept")?.value;
+        const status = document.getElementById("mission-filter-status")?.value;
+        if (search) params.set("search", search);
+        if (month) params.set("month", month);
+        if (year) params.set("year", year);
+        if (dept) params.set("department", dept);
+        if (status) params.set("status", status);
+        try {
+            if (!document.getElementById("mission-filter-dept")?.options?.length > 1) {
+                try {
+                    const depts = await apiGet("/departments/");
+                    const sel = document.getElementById("mission-filter-dept");
+                    if (sel) sel.innerHTML = `<option value="">Tous</option>${depts.map((d) =>
+                        `<option value="${d.id}">${d.name}</option>`).join("")}`;
+                } catch (e) { /* ignore */ }
+            }
+            const missions = await apiGet(`/missions/?${params}`);
+            const canWrite = canWriteModule("presences") && canManagePresences();
+            tbody.innerHTML = missions.map((m) => {
+                const actions = [];
+                actions.push(`<button class="btn btn-small" onclick="window.viewMission(${m.id})" title="Voir"><i class="fas fa-eye"></i></button>`);
+                if (canWrite) actions.push(`<button class="btn btn-small" onclick="window.openMissionForm(${m.id})" title="Modifier"><i class="fas fa-edit"></i></button>`);
+                if (canWrite && m.status === "PENDING_APPROVAL") {
+                    actions.push(`<button class="btn btn-small btn-primary" onclick="window.approveMission(${m.id})" title="Approuver"><i class="fas fa-check"></i></button>`);
+                }
+                if (canWrite && ["APPROVED", "IN_PROGRESS"].includes(m.status)) {
+                    actions.push(`<button class="btn btn-small btn-secondary" onclick="window.startMission(${m.id})" title="Démarrer"><i class="fas fa-play"></i></button>`);
+                    actions.push(`<button class="btn btn-small" onclick="window.openCloseMission(${m.id})" title="Clôturer"><i class="fas fa-flag-checkered"></i></button>`);
+                }
+                if (canDeleteMission()) {
+                    actions.push(`<button class="btn btn-small btn-danger" onclick="window.deleteMission(${m.id})" title="Supprimer"><i class="fas fa-trash"></i></button>`);
+                }
+                return `<tr>
+                    <td>${m.mission_number || "-"}</td>
+                    <td>${m.employee_name}</td><td>${m.employee_matricule || "-"}</td>
+                    <td>${m.employee_department || "-"}</td>
+                    <td>${m.title}</td><td>${m.destination}${m.city ? ", " + m.city : ""}</td>
+                    <td>${m.start_date}</td><td>${m.end_date}</td><td>${m.days_count || "-"}</td>
+                    <td>${missionStatusBadge(m.status)}</td>
+                    <td style="white-space:nowrap">${actions.join(" ")}</td>
+                </tr>`;
+            }).join("") || `<tr><td colspan="11">Aucune mission trouvée.</td></tr>`;
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="11" class="error-message">Impossible de charger les missions.</td></tr>`;
+        }
+    };
+
+    function missionFormHtml(record, employees) {
+        const empId = record?.employee || employees[0]?.id || "";
+        const emp = employees.find((e) => String(e.id) === String(empId)) || employees[0] || {};
+        const readonly = record?.status === "COMPLETED";
+        return `
+            <h3><i class="fas fa-briefcase"></i> ${record?.id ? "Modifier la mission" : "Nouvelle mission"}</h3>
+            <input type="hidden" id="mission-id" value="${record?.id || ""}">
+            <h4>Informations employé</h4>
+            <div class="form-row">
+                <div><label>Employé <span class="req">*</span></label>
+                    <select id="mission-employee" ${readonly ? "disabled" : ""} onchange="window.updateMissionEmployeeInfo()">
+                        ${employees.map((e) => `<option value="${e.id}" ${String(e.id) === String(empId) ? "selected" : ""}>${e.full_name} (${e.matricule})</option>`).join("")}
+                    </select></div>
+                <div><label>Matricule</label><input id="mission-matricule" readonly value="${emp.matricule || "-"}"></div>
+                <div><label>Département</label><input id="mission-department" readonly value="${emp.department_name || "-"}"></div>
+                <div><label>Poste</label><input id="mission-position" readonly value="${emp.position || "-"}"></div>
+                <div><label>Responsable</label><input id="mission-manager" readonly value="${record?.manager_name || emp.manager_name || "-"}"></div>
+            </div>
+            <h4>Informations sur la mission</h4>
+            <div class="form-row">
+                <div><label>Objet <span class="req">*</span></label><input id="mission-title" value="${record?.title || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Lieu <span class="req">*</span></label><input id="mission-destination" value="${record?.destination || ""}" ${readonly ? "readonly" : ""}></div>
+            </div>
+            <div><label>Description</label><textarea id="mission-description" rows="2" ${readonly ? "readonly" : ""}>${record?.description || ""}</textarea></div>
+            <div class="form-row">
+                <div><label>Ville</label><input id="mission-city" value="${record?.city || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Province</label><input id="mission-province" value="${record?.province || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Pays</label><input id="mission-country" value="${record?.country || "RDC"}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Organisme visité</label><input id="mission-org" value="${record?.visited_organization || ""}" ${readonly ? "readonly" : ""}></div>
+            </div>
+            <h4>Période</h4>
+            <div class="form-row">
+                <div><label>Date début <span class="req">*</span></label><input type="date" id="mission-start" value="${record?.start_date || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Heure départ</label><input type="time" id="mission-start-time" value="${(record?.start_time || "").slice(0, 5)}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Date fin <span class="req">*</span></label><input type="date" id="mission-end" value="${record?.end_date || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Heure retour</label><input type="time" id="mission-end-time" value="${(record?.end_time || "").slice(0, 5)}" ${readonly ? "readonly" : ""}></div>
+            </div>
+            <h4>Conditions</h4>
+            <div class="form-row">
+                <div><label>Transport</label><input id="mission-transport" value="${record?.transport_mode || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Hébergement</label><input id="mission-accommodation" value="${record?.accommodation || ""}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Avance</label><input type="number" step="0.01" id="mission-advance" value="${record?.advance_amount || 0}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Indemnité/jour</label><input type="number" step="0.01" id="mission-daily" value="${record?.daily_allowance || 0}" ${readonly ? "readonly" : ""}></div>
+                <div><label>Budget</label><input type="number" step="0.01" id="mission-budget" value="${record?.budget_allocated || 0}" ${readonly ? "readonly" : ""}></div>
+            </div>
+            <div><label>Commentaires</label><textarea id="mission-comments" rows="2" ${readonly ? "readonly" : ""}>${record?.comments || ""}</textarea></div>
+            ${!readonly ? `<div><label>Pièce jointe</label><input type="file" id="mission-file" accept=".pdf,.jpg,.jpeg,.png,.docx"></div>` : ""}
+            ${record?.documents?.length ? `<h4>Documents</h4><ul>${record.documents.map((d) =>
+                `<li><a href="${d.file_url}" target="_blank">${d.doc_type_label || d.label}</a></li>`).join("")}</ul>` : ""}
+            <div class="action-bar">
+                ${!readonly ? `<button type="button" class="btn btn-primary" onclick="window.saveMission()"><i class="fas fa-save"></i> Enregistrer</button>` : ""}
+                <button type="button" class="btn btn-secondary" onclick="window.closeMissionModal()">Fermer</button>
+            </div>`;
+    }
+
+    window.updateMissionEmployeeInfo = () => {
+        const emp = getEmployeeById(document.getElementById("mission-employee")?.value);
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set("mission-matricule", emp?.matricule || "-");
+        set("mission-department", emp?.department_name || "-");
+        set("mission-position", emp?.position || "-");
+        set("mission-manager", emp?.manager_name || "-");
+    };
+
+    window.openMissionForm = async (id) => {
+        const modal = document.getElementById("mission-modal");
+        const body = document.getElementById("mission-modal-body");
+        if (!modal || !body) return;
+        console.log("Mission à modifier :", id || "(nouvelle)");
+        modal.hidden = false;
+        body.innerHTML = `<p class="hint-text"><i class="fas fa-spinner fa-spin"></i> Chargement...</p>`;
+        if (!_presEmployeesCache.length) {
+            try { _presEmployeesCache = await apiGet("/employees/"); } catch (e) { _presEmployeesCache = []; }
+        }
+        try {
+            const record = id ? await apiGet(`/missions/${id}/`) : null;
+            body.innerHTML = missionFormHtml(record, _presEmployeesCache);
+        } catch (e) {
+            console.error("openMissionForm:", e);
+            body.innerHTML = `<p class="error-message">Impossible de charger la mission.</p>`;
+        }
+    };
+
+    window.viewMission = window.openMissionForm;
+
+    window.closeMissionModal = () => {
+        const m = document.getElementById("mission-modal");
+        if (m) m.hidden = true;
+    };
+
+    function buildMissionPayload(isCreate) {
+        const payload = {
+            employee: Number(document.getElementById("mission-employee")?.value),
+            title: document.getElementById("mission-title")?.value?.trim(),
+            destination: document.getElementById("mission-destination")?.value?.trim(),
+            description: document.getElementById("mission-description")?.value || "",
+            city: document.getElementById("mission-city")?.value || "",
+            province: document.getElementById("mission-province")?.value || "",
+            country: document.getElementById("mission-country")?.value || "RDC",
+            visited_organization: document.getElementById("mission-org")?.value || "",
+            start_date: document.getElementById("mission-start")?.value,
+            start_time: document.getElementById("mission-start-time")?.value || null,
+            end_date: document.getElementById("mission-end")?.value,
+            end_time: document.getElementById("mission-end-time")?.value || null,
+            transport_mode: document.getElementById("mission-transport")?.value || "",
+            accommodation: document.getElementById("mission-accommodation")?.value || "",
+            advance_amount: document.getElementById("mission-advance")?.value || 0,
+            daily_allowance: document.getElementById("mission-daily")?.value || 0,
+            budget_allocated: document.getElementById("mission-budget")?.value || 0,
+            comments: document.getElementById("mission-comments")?.value || "",
+        };
+        if (isCreate) payload.status = "PENDING_APPROVAL";
+        return payload;
+    }
+
+    window.saveMission = async () => {
+        const id = document.getElementById("mission-id")?.value;
+        const isEdit = Boolean(id);
+        const payload = buildMissionPayload(!isEdit);
+        console.log("Mission à modifier :", id || "(nouvelle)");
+        console.log("Données envoyées :", payload);
+        if (!payload.employee || !payload.title || !payload.destination || !payload.start_date || !payload.end_date) {
+            alert("Veuillez compléter les champs obligatoires.");
+            return;
+        }
+        try {
+            let missionId = id;
+            let response;
+            if (isEdit) {
+                response = await apiFetch(`/missions/${id}/`, { method: "PATCH", body: payload });
+                console.log("Réponse API :", response);
+                missionId = response?.id || id;
+            } else {
+                response = await apiPost("/missions/", payload);
+                console.log("Réponse API :", response);
+                missionId = response?.id;
+            }
+            const file = document.getElementById("mission-file")?.files?.[0];
+            if (file && missionId) {
+                const fd = new FormData();
+                fd.append("file", file);
+                fd.append("doc_type", "order");
+                await apiFetch(`/missions/${missionId}/documents/`, { method: "POST", body: fd });
+            }
+            closeMissionModal();
+            const msg = isEdit
+                ? "Mission mise à jour avec succès."
+                : "Mission enregistrée avec succès.";
+            await refreshAfterMissionMutation(msg);
+            if (typeof showToast === "function") showToast(msg, "success");
+        } catch (e) {
+            console.error("saveMission:", e);
+            const msg = isEdit
+                ? "Impossible d'enregistrer les modifications. Veuillez réessayer."
+                : (e.message || "Impossible d'enregistrer la mission. Veuillez réessayer.");
+            alert(msg);
+        }
+    };
+
+    window.approveMission = async (id) => {
+        try {
+            await apiPost(`/missions/${id}/approve/`, {});
+            await refreshAfterMissionMutation("Mission approuvée.");
+            if (typeof showToast === "function") showToast("Mission approuvée", "success");
+        } catch (e) {
+            console.error("approveMission:", e);
+            alert(e.message || "Impossible d'approuver la mission.");
+        }
+    };
+
+    window.startMission = async (id) => {
+        try {
+            await apiPost(`/missions/${id}/start/`, {});
+            await refreshAfterMissionMutation("Mission démarrée.");
+            if (typeof showToast === "function") showToast("Mission démarrée", "success");
+        } catch (e) {
+            console.error("startMission:", e);
+            alert(e.message || "Impossible de démarrer la mission.");
+        }
+    };
+
+    window.openCloseMission = async (id) => {
+        const modal = document.getElementById("mission-modal");
+        const body = document.getElementById("mission-modal-body");
+        if (!modal || !body) return;
+        modal.hidden = false;
+        body.innerHTML = `
+            <h3><i class="fas fa-flag-checkered"></i> Clôturer la mission</h3>
+            <input type="hidden" id="close-mission-id" value="${id}">
+            <div><label>Résumé</label><textarea id="close-summary" rows="2"></textarea></div>
+            <div><label>Résultats obtenus</label><textarea id="close-results" rows="2"></textarea></div>
+            <div><label>Difficultés</label><textarea id="close-difficulties" rows="2"></textarea></div>
+            <div><label>Recommandations</label><textarea id="close-recommendations" rows="2"></textarea></div>
+            <div><label>Dépenses réelles</label><input type="number" step="0.01" id="close-expenses"></div>
+            <div><label>Justificatifs</label><input type="file" id="close-file" accept=".pdf,.jpg,.jpeg,.png,.docx" multiple></div>
+            <div class="action-bar">
+                <button class="btn btn-primary" onclick="window.submitCloseMission()">Clôturer</button>
+                <button class="btn btn-secondary" onclick="window.closeMissionModal()">Annuler</button>
+            </div>`;
+    };
+
+    window.submitCloseMission = async () => {
+        const id = document.getElementById("close-mission-id")?.value;
+        await apiPost(`/missions/${id}/close/`, {
+            closure_summary: document.getElementById("close-summary")?.value || "",
+            closure_results: document.getElementById("close-results")?.value || "",
+            closure_difficulties: document.getElementById("close-difficulties")?.value || "",
+            closure_recommendations: document.getElementById("close-recommendations")?.value || "",
+            actual_expenses: document.getElementById("close-expenses")?.value || 0,
+        });
+        const files = document.getElementById("close-file")?.files;
+        if (files?.length) {
+            for (const file of files) {
+                const fd = new FormData();
+                fd.append("file", file);
+                fd.append("doc_type", "closure");
+                await apiFetch(`/missions/${id}/documents/`, { method: "POST", body: fd });
+            }
+        }
+        closeMissionModal();
+        await refreshAfterMissionMutation("Mission clôturée.");
+        if (typeof showToast === "function") showToast("Mission clôturée", "success");
+    };
+
+    window.deleteMission = async (id) => {
+        if (!confirm("Êtes-vous sûr de vouloir supprimer cette mission ?")) return;
+        try {
+            await apiDelete(`/missions/${id}/`);
+            await refreshAfterMissionMutation("Mission supprimée.");
+            if (typeof showToast === "function") showToast("Mission supprimée", "success");
+        } catch (e) {
+            console.error("deleteMission:", e);
+            alert(e.message || "Impossible de supprimer la mission.");
+        }
+    };
+
+    window.exportMissions = async (format) => {
+        const params = new URLSearchParams({ export_format: format });
+        const search = document.getElementById("mission-search")?.value;
+        const month = document.getElementById("mission-filter-month")?.value;
+        const year = document.getElementById("mission-filter-year")?.value;
+        const dept = document.getElementById("mission-filter-dept")?.value;
+        const status = document.getElementById("mission-filter-status")?.value;
+        if (search) params.set("search", search);
+        if (month) params.set("month", month);
+        if (year) params.set("year", year);
+        if (dept) params.set("department", dept);
+        if (status) params.set("status", status);
+        try {
+            const response = await otomiaApiFetch(`/missions/export/?${params}`, {
+                headers: { Accept: "application/octet-stream, */*" },
+            });
+            if (!response.ok) throw new Error("Export impossible.");
+            if (typeof downloadBlobFromResponse === "function") {
+                await downloadBlobFromResponse(response, `MISSIONS.${format === "docx" ? "docx" : format}`);
+            }
+            if (typeof showToast === "function") showToast("Export réussi", "success");
+        } catch (e) {
+            alert(e.message || "Erreur d'export.");
+        }
+    };
+
+    window.printMissionsList = () => {
+        const area = document.getElementById("missions-print-area");
+        if (!area) return window.print();
+        const w = window.open("", "_blank");
+        w.document.write(`<html><head><title>Missions</title><style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:11px}th{background:#1a5f9e;color:#fff}</style></head><body>${area.innerHTML}</body></html>`);
+        w.document.close();
+        w.print();
+    };
+
     window.refreshPresencesData = async function refreshPresencesData(options = {}) {
         if (!document.getElementById("pres-stats-bar")) return;
 
@@ -859,29 +1283,29 @@
         }
 
         try {
-            const [absences, missions] = await Promise.all([
-                apiGet("/absences/"),
-                apiGet("/missions/"),
-            ]);
+            const absences = await apiGet("/absences/");
             const canValidate = canWriteModule("presences") && currentUser?.role !== "EMPLOYE";
             const absEl = document.getElementById("abs-list");
             if (absEl) {
-                absEl.innerHTML = absences.map((a) => `
-                    <tr>
-                        <td>${a.employee_name}</td><td>${a.absence_type}</td>
-                        <td>${a.start_date}</td><td>${a.end_date}</td><td>${statusBadge(a.status)}</td>
+                absEl.innerHTML = absences.map((a) => {
+                    const days = a.days_count || (a.start_date && a.end_date
+                        ? Math.round((new Date(a.end_date) - new Date(a.start_date)) / 86400000) + 1
+                        : "—");
+                    const justif = a.justification_file_url
+                        ? ` <a href="${a.justification_file_url}" target="_blank" title="Justificatif"><i class="fas fa-paperclip"></i></a>` : "";
+                    return `<tr>
+                        <td>${a.employee_name}</td>
+                        <td>${a.start_date}</td><td>${a.end_date}</td><td>${days}</td>
+                        <td>${(a.reason || "—").slice(0, 80)}${justif}</td>
+                        <td>${statusBadge(a.status)}</td>
                         <td>${a.status === "Pending" && canValidate ? `
                             <button class="btn btn-small btn-primary" onclick="approveAbs(${a.id})">Approuver</button>
                             <button class="btn btn-small btn-danger" onclick="rejectAbs(${a.id})">Refuser</button>` : "-"}
                         </td>
-                    </tr>`).join("") || "<tr><td colspan='6'>Aucune demande</td></tr>";
+                    </tr>`;
+                }).join("") || "<tr><td colspan='7'>Aucune demande</td></tr>";
             }
-            const missEl = document.getElementById("miss-list");
-            if (missEl) {
-                missEl.innerHTML = missions.map((m) => `
-                    <tr><td>${m.employee_name}</td><td>${m.title}</td><td>${m.destination}</td>
-                    <td>${m.start_date} → ${m.end_date}</td><td>${m.status}</td></tr>`).join("") || "<tr><td colspan='5'>Aucune mission</td></tr>";
-            }
+            if (document.getElementById("miss-list")) await loadMissionsPanel();
 
             const sync = await otomiaFetchSync();
             renderPresStats(sync.presences);

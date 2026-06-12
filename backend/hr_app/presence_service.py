@@ -80,9 +80,8 @@ def filter_absence_queryset(user, qs=None):
 
 
 def filter_mission_queryset(user, qs=None):
-    qs = qs or Mission.objects.select_related('employee', 'employee__department')
-    emp_ids = filter_employees_queryset(user).values_list('id', flat=True)
-    return qs.filter(employee_id__in=emp_ids)
+    from .mission_service import filter_missions_queryset
+    return filter_missions_queryset(user, qs)
 
 
 def user_can_edit_attendance(user, attendance=None, employee_id=None):
@@ -265,8 +264,9 @@ def _build_leave_ranges(employee_ids, start, end):
 
 def _build_mission_ranges(employee_ids, start, end):
     ranges = {eid: [] for eid in employee_ids}
+    from .mission_service import MISSION_ACTIVE_STATUSES
     for mission in Mission.objects.filter(
-        employee_id__in=employee_ids, status__in=['Approved', 'Completed'],
+        employee_id__in=employee_ids, status__in=MISSION_ACTIVE_STATUSES,
         start_date__lte=end, end_date__gte=start,
     ):
         ranges.setdefault(mission.employee_id, []).append(

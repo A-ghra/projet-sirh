@@ -651,6 +651,19 @@ tr:hover { background: #fafcff; }
 .pres-wf-badge.wf-confirmed { background: #d4edda; color: #155724; }
 .pres-wf-badge.wf-regularized { background: #cce5ff; color: #004085; }
 .pres-wf-badge.wf-contested { background: #f8d7da; color: #721c24; }
+.contract-status { font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; background: #e9ecef; }
+.contract-status-locked, .contract-status-signed { background: #d4edda; color: #155724; }
+.contract-status-pending_signature { background: #fff3cd; color: #856404; }
+.contract-status-draft { background: #cce5ff; color: #004085; }
+.contract-status-cancelled, .contract-status-archived { background: #f8d7da; color: #721c24; }
+.contract-type-bars .bar-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.contract-type-bars .bar-fill { height: 8px; background: #1a5f9e; border-radius: 4px; flex: 1; max-width: 200px; }
+.contract-modal-panel { max-width: 900px; max-height: 90vh; overflow-y: auto; }
+.contract-lifecycle { font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; }
+.contract-lc-active { background: #d4edda; color: #155724; }
+.contract-lc-expiring_soon { background: #fff3cd; color: #856404; }
+.contract-lc-expired { background: #f8d7da; color: #721c24; }
+.contract-lc-terminated { background: #e9ecef; color: #495057; }
 .pres-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; font-size: 0.85rem; }
 .pres-grid-wrap { overflow-x: auto; max-width: 100%; }
 .pres-grid-table { font-size: 0.72rem; border-collapse: collapse; min-width: 900px; }

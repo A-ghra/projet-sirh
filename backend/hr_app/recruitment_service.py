@@ -140,14 +140,19 @@ def convert_applicant_to_employee(applicant, user, send_email=True, force_passwo
         {'label': b.label, 'amount': str(b.amount), 'description': b.description}
         for b in applicant.benefits.all()
     ]
+    from .contract_service import generate_contract_number
     Contract.objects.create(
         employee=employee,
+        contract_number=generate_contract_number(employee),
         contract_type=applicant.contract_type,
         start_date=hire_date,
         end_date=applicant.contract_end,
         work_days_per_week=applicant.work_days_per_week,
         work_schedule=applicant.work_schedule,
+        salary_base=applicant.salary_base or employee.salary_base,
+        position_title=applicant.position or employee.position,
         benefits=benefits,
+        status='DRAFT',
         is_active=True,
     )
 

@@ -6,7 +6,7 @@ from .models import (
     AppModule, ModuleFeature, CustomField,
     EmployeeMovement, Contract, Payroll, PayrollCalculationLog, PayrollExportLog,
     WorkScheduleSettings, Absence,
-    Attendance, Mission, Document, Notification, Recruitment, Applicant,
+    Attendance, Mission, MissionDocument, Document, Notification, Recruitment, Applicant,
     Training, EmployeeTrainingResult, PerformanceReview, AuditLog, Report,
     ApplicantBenefit, SkillCategory, Skill, EmployeeSkill,
     Certification, Objective, EmployeeKPI,
@@ -160,12 +160,80 @@ class EmployeeMovementSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class ContractTypeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .models import ContractTypeConfig
+        model = ContractTypeConfig
+        fields = '__all__'
+
+
+class ContractAmendmentSerializer(serializers.ModelSerializer):
+    contract_number = serializers.ReadOnlyField(source='contract.contract_number')
+
+    class Meta:
+        from .models import ContractAmendment
+        model = ContractAmendment
+        fields = '__all__'
+
+
 class ContractSerializer(serializers.ModelSerializer):
     employee_name = serializers.ReadOnlyField(source='employee.full_name')
+    employee_matricule = serializers.ReadOnlyField(source='employee.matricule')
+    employee_department = serializers.SerializerMethodField()
+    employee_position = serializers.ReadOnlyField(source='employee.position')
+    manager_name = serializers.SerializerMethodField()
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    lifecycle_status = serializers.SerializerMethodField()
+    lifecycle_status_label = serializers.SerializerMethodField()
+    amendments = ContractAmendmentSerializer(many=True, read_only=True)
+    file_url = serializers.SerializerMethodField()
+    imported_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Contract
         fields = '__all__'
+        read_only_fields = (
+            'is_locked', 'employee_signed_at', 'hr_signed_at', 'direction_signed_at',
+            'archived_at', 'cancelled_at', 'created_at', 'updated_at',
+            'imported_at', 'imported_by', 'source',
+        )
+
+    def get_lifecycle_status(self, obj):
+        from .contract_service import compute_lifecycle_status
+        return compute_lifecycle_status(obj)
+
+    def get_lifecycle_status_label(self, obj):
+        from .contract_service import compute_lifecycle_status, LIFECYCLE_LABELS
+        return LIFECYCLE_LABELS.get(compute_lifecycle_status(obj), '-')
+
+    def get_imported_by_name(self, obj):
+        if obj.imported_by:
+            return obj.imported_by.get_full_name() or obj.imported_by.username
+        return None
+
+    def get_employee_department(self, obj):
+        if obj.employee and obj.employee.department:
+            return obj.employee.department.name
+        return '-'
+
+    def get_manager_name(self, obj):
+        if obj.employee and obj.employee.manager:
+            return obj.employee.manager.full_name
+        return '-'
+
+    def get_file_url(self, obj):
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
+
+    def validate(self, attrs):
+        instance = getattr(self, 'instance', None)
+        if instance and (instance.is_locked or instance.status in ('LOCKED', 'ARCHIVED', 'CANCELLED')):
+            raise serializers.ValidationError('Contrat verrouillé — créez un avenant pour toute modification.')
+        return attrs
 
 
 class PayrollCalculationLogSerializer(serializers.ModelSerializer):
@@ -216,20 +284,32 @@ class EmployeeTrainingResultSerializer(serializers.ModelSerializer):
 
 class AbsenceSerializer(serializers.ModelSerializer):
     employee_name = serializers.ReadOnlyField(source='employee.full_name')
-    absence_type = serializers.CharField()
+    absence_type = serializers.CharField(required=False, default='CP')
+    days_count = serializers.IntegerField(read_only=True)
+    justification_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Absence
         fields = '__all__'
 
+    def get_justification_file_url(self, obj):
+        if obj.justification_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.justification_file.url)
+            return obj.justification_file.url
+        return None
+
     def validate_absence_type(self, value):
         from .models import Absence
         from .presence_service import LEAVE_FEATURE_TO_ABSENCE, map_leave_feature_key
+        if not value:
+            return 'CP'
         if value in LEAVE_FEATURE_TO_ABSENCE or (isinstance(value, str) and value.startswith('conge_')):
             value = map_leave_feature_key(value)
         valid = {c[0] for c in Absence.ABSENCE_TYPES}
         if value not in valid:
-            raise serializers.ValidationError(f'Type de congé invalide : {value}')
+            return 'CP'
         return value
 
     def validate(self, attrs):
@@ -325,12 +405,66 @@ class AttendanceSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class MissionDocumentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    doc_type_label = serializers.CharField(source='get_doc_type_display', read_only=True)
+
+    class Meta:
+        model = MissionDocument
+        fields = '__all__'
+        read_only_fields = ('uploaded_at', 'uploaded_by')
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.file.url)
+        return obj.file.url
+
+
 class MissionSerializer(serializers.ModelSerializer):
     employee_name = serializers.ReadOnlyField(source='employee.full_name')
+    employee_matricule = serializers.ReadOnlyField(source='employee.matricule')
+    employee_department = serializers.SerializerMethodField()
+    employee_position = serializers.ReadOnlyField(source='employee.position')
+    manager_name = serializers.SerializerMethodField()
+    status_label = serializers.SerializerMethodField()
+    days_count = serializers.SerializerMethodField()
+    documents = MissionDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Mission
         fields = '__all__'
+        read_only_fields = (
+            'created_at', 'updated_at', 'closed_at', 'payroll_synced',
+            'approved_by', 'created_by', 'status',
+        )
+
+    def get_employee_department(self, obj):
+        return obj.employee.department.name if obj.employee.department else '-'
+
+    def get_manager_name(self, obj):
+        if obj.employee.manager:
+            return obj.employee.manager.full_name
+        return '-'
+
+    def get_status_label(self, obj):
+        from .mission_service import STATUS_LABELS
+        return STATUS_LABELS.get(obj.status, obj.status)
+
+    def get_days_count(self, obj):
+        from .mission_service import mission_days_count
+        return mission_days_count(obj)
+
+    def validate(self, attrs):
+        start = attrs.get('start_date') or getattr(self.instance, 'start_date', None)
+        end = attrs.get('end_date') or getattr(self.instance, 'end_date', None)
+        if start and end and end < start:
+            raise serializers.ValidationError({
+                'end_date': 'La date de fin doit être postérieure ou égale à la date de début.',
+            })
+        return attrs
 
 
 class DocumentSerializer(serializers.ModelSerializer):

@@ -27,7 +27,7 @@ const FEATURE_TYPE_OPTIONS = [
     ["general", "Générale"], ["menu_tab", "Onglet / Menu"],
     ["payroll_gain", "Gain de paie"], ["payroll_retention", "Retenue de paie"],
     ["recruitment_step", "Étape recrutement"], ["training_type", "Type formation"],
-    ["portal_section", "Section portail"], ["leave_type", "Type de congé"],
+    ["portal_section", "Section portail"],
     ["kpi_indicator", "Indicateur KPI"], ["evaluation_method", "Méthode d'évaluation"],
     ["report_widget", "Widget reporting"],
 ];
@@ -631,6 +631,7 @@ function loadModule(name, options = {}) {
     const modules = {
         dashboard: renderDashboard,
         "admin-personnel": renderAdminPersonnel,
+        contrats: window.renderContrats,
         paie: renderPaie,
         presences: window.renderPresences,
         recrutement: renderRecrutement,
@@ -946,29 +947,55 @@ async function loadDashboardFilters() {
 
 // --- Admin Personnel ---
 async function renderAdminPersonnel() {
+    const dbTabs = getActiveFeatures("admin-personnel", "menu_tab");
+    const defaultTabs = [
+        { feature_key: "onglet_employes", feature_name: "Employés", icon: "fa-users" },
+        { feature_key: "onglet_contrats", feature_name: "Contrats", icon: "fa-file-contract" },
+    ];
+    const tabs = dbTabs.some((t) => t.feature_key === "onglet_employes") ? dbTabs : defaultTabs;
+    const tabsHtml = renderModuleTabsHtml(tabs, "admin-personnel-tabs");
     contentArea.innerHTML = `
-        <div class="module-container">
+        <div class="module-container animated-panel">
             <div class="action-bar">
-                <h2>Gestion Administrative du Personnel</h2>
-                <button class="btn btn-primary" onclick="showAddEmployee()"><i class="fas fa-plus"></i> Ajouter</button>
+                <h2><i class="fas fa-users-cog"></i> Administration du Personnel</h2>
             </div>
-            <table><thead><tr><th>Matricule</th><th>Nom</th><th>Poste</th><th>Département</th><th>Salaire</th><th>Statut</th><th>Actions</th></tr></thead>
-            <tbody id="emp-list"></tbody></table>
-        </div>
-        <div class="panel" id="add-emp-form" hidden>
-            <h3>Nouvel employé</h3>
-            <div class="form-row">
-                <input id="new-matricule" placeholder="Matricule">
-                <input id="new-name" placeholder="Nom complet">
-                <input id="new-position" placeholder="Poste">
-                <input id="new-salary" type="number" placeholder="Salaire base">
-                <input id="new-email" placeholder="Email">
+            ${tabsHtml}
+            <div class="module-tab-panel active" id="admin-panel-employes">
+                <div class="action-bar">
+                    <h3>Employés</h3>
+                    <button class="btn btn-primary" onclick="showAddEmployee()"><i class="fas fa-plus"></i> Ajouter</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="pres-table"><thead><tr><th>Matricule</th><th>Nom</th><th>Poste</th><th>Département</th><th>Salaire</th><th>Statut</th><th>Actions</th></tr></thead>
+                    <tbody id="emp-list"></tbody></table>
+                </div>
+                <div class="panel" id="add-emp-form" hidden>
+                    <h3>Nouvel employé</h3>
+                    <div class="form-row">
+                        <input id="new-matricule" placeholder="Matricule">
+                        <input id="new-name" placeholder="Nom complet">
+                        <input id="new-position" placeholder="Poste">
+                        <input id="new-salary" type="number" placeholder="Salaire base">
+                        <input id="new-email" placeholder="Email">
+                    </div>
+                    <div class="form-row" id="emp-custom-fields"></div>
+                    <button class="btn btn-primary" onclick="saveEmployee()">Enregistrer</button>
+                </div>
             </div>
-            <div class="form-row" id="emp-custom-fields"></div>
-            <button class="btn btn-primary" onclick="saveEmployee()">Enregistrer</button>
+            <div class="module-tab-panel" id="admin-panel-contrats" hidden></div>
         </div>`;
     document.getElementById("emp-custom-fields").innerHTML =
         getVisibleCustomFields("admin-personnel").map((f) => renderCustomFieldInput(f, "", "new")).join("");
+    bindModuleTabs("admin-personnel-tabs", (key) => {
+        const tab = key.replace("onglet_", "");
+        const empPanel = document.getElementById("admin-panel-employes");
+        const ctrPanel = document.getElementById("admin-panel-contrats");
+        if (empPanel) empPanel.hidden = tab !== "employes";
+        if (ctrPanel) ctrPanel.hidden = tab !== "contrats";
+        if (tab === "contrats" && typeof window.renderAdminPersonnelContracts === "function") {
+            window.renderAdminPersonnelContracts();
+        }
+    });
     await loadEmployees();
 }
 
@@ -1062,6 +1089,21 @@ window.viewFile = async (id) => {
         <table><thead><tr><th>Période</th><th>Net</th><th>Statut</th><th>Actions</th></tr></thead><tbody>${payslipRows}</tbody></table>
         <h4 style="margin-top:16px">Historique des exports</h4>
         <table><thead><tr><th>Date</th><th>Fichier</th><th>Format</th><th>Email</th></tr></thead><tbody>${exportRows}</tbody></table>
+        <h4 style="margin-top:16px"><i class="fas fa-file-contract"></i> Contrats (${(f.contracts || []).length})</h4>
+        <div class="action-bar">
+            ${canWriteModule("contrats") ? `<button class="btn btn-primary btn-small" onclick="window.importContractForEmployee(${id})"><i class="fas fa-file-import"></i> Importer un contrat</button>` : ""}
+        </div>
+        <table><thead><tr><th>N°</th><th>Type</th><th>Début</th><th>Fin</th><th>Statut</th><th>Export</th></tr></thead>
+        <tbody>${(f.contracts || []).map((c) => `<tr>
+            <td>${c.contract_number || "-"}</td>
+            <td>${c.contract_type}</td>
+            <td>${c.start_date}</td>
+            <td>${c.end_date || "—"}</td>
+            <td>${c.lifecycle_status_label || c.status}${c.is_locked ? " 🔒" : ""}</td>
+            <td style="white-space:nowrap">
+                <button class="btn btn-small btn-secondary" onclick="window.exportContractModal(${c.id},'${(c.contract_number || "").replace(/'/g, "")}')"><i class="fas fa-file-export"></i> Exporter</button>
+                ${c.file_url ? `<a class="btn btn-small" href="${c.file_url}" target="_blank"><i class="fas fa-paperclip"></i></a>` : ""}
+            </td></tr>`).join("") || "<tr><td colspan='6'>Aucun contrat</td></tr>"}</tbody></table>
         <h4 style="margin-top:16px">Documents RH (${f.documents.length})</h4>
         <ul>${f.documents.map((d) => `<li>${d.title} — ${d.document_type}</li>`).join("") || "<li>Aucun document</li>"}</ul>
         ${typeof renderEmployeeTalentDossier === "function" ? renderEmployeeTalentDossier(f) : ""}`;
@@ -1682,8 +1724,28 @@ window.individualExportAction = async (action) => {
 // --- Formation & Performances → voir talent.js ---
 
 // --- Portail Employé ---
+function portalFriendlyError(err) {
+    console.error("Portail Employé:", err);
+    const msg = String(err?.message || err || "");
+    if (/fetch|network|connexion impossible|failed to fetch|load failed/i.test(msg) || err?.name === "TypeError") {
+        return "Le serveur OTOMIA RH n'est pas disponible.";
+    }
+    if (/session expirée|401|non autorisé|403/i.test(msg)) {
+        return "Votre session a expiré. Veuillez vous reconnecter.";
+    }
+    if (/not defined|referenceerror/i.test(msg)) {
+        return "Impossible de récupérer les informations du Portail Employé.";
+    }
+    return msg || "Impossible de récupérer les informations du Portail Employé.";
+}
+
 async function renderPortailEmploye() {
     contentArea.innerHTML = `<div class="loader">Chargement du portail...</div>`;
+    const apiBase = typeof getApiBaseUrl === "function"
+        ? getApiBaseUrl()
+        : (window.OTOMIA_API_FIXED || window.OTOMIA_API_BASE || "http://127.0.0.1:8000/api");
+    console.log("OTOMIA_API_FIXED :", apiBase);
+    console.log("Chargement du Portail Employé");
     try {
         const isRh = ["ADMIN_RH", "GESTIONNAIRE_RH"].includes(currentUser.role);
         const isEmployee = currentUser.role === "EMPLOYE";
@@ -1712,6 +1774,7 @@ async function renderPortailEmploye() {
             { feature_key: "dashboard", feature_name: "Tableau de bord", icon: "fa-chart-line" },
             { feature_key: "profil", feature_name: "Mon Profil", icon: "fa-user" },
             { feature_key: "bulletins", feature_name: "Mes Bulletins", icon: "fa-file-invoice-dollar" },
+            { feature_key: "contrats", feature_name: "Mes contrats", icon: "fa-file-contract" },
             { feature_key: "conges", feature_name: "Mes Congés", icon: "fa-umbrella-beach" },
             { feature_key: "presences", feature_name: "Mes Présences", icon: "fa-clock" },
             { feature_key: "evaluations", feature_name: "Évaluations", icon: "fa-star" },
@@ -1803,12 +1866,38 @@ async function renderPortailEmploye() {
                 </tr>`).join("")}</tbody></table>` : ""}
             </div>
 
+            <div class="portail-section panel" id="tab-contrats">
+                <h3><i class="fas fa-file-contract"></i> Mes contrats</h3>
+                <p class="hint-text">Consultation en lecture seule — téléchargement et signature électronique uniquement.</p>
+                <table><thead><tr><th>N°</th><th>Type</th><th>Début</th><th>Fin</th><th>Statut</th><th>Signatures</th><th>Actions</th></tr></thead>
+                <tbody>${(portal.contracts || []).map((c) => `<tr>
+                    <td>${c.contract_number || "-"}</td>
+                    <td>${c.contract_type}</td>
+                    <td>${c.start_date}</td>
+                    <td>${c.end_date || "—"}</td>
+                    <td>${c.lifecycle_status_label || c.status_label || c.status}${c.is_locked ? " 🔒" : ""}</td>
+                    <td>${c.employee_signed_at ? "✅ Emp." : "⏳"} ${c.hr_signed_at ? "✅ RH" : "⏳"} ${c.direction_signed_at ? "✅ Dir." : "⏳"}</td>
+                    <td style="white-space:nowrap">
+                        <button type="button" class="btn btn-small" onclick="exportContract(${c.id}, 'pdf')" title="PDF"><i class="fas fa-file-pdf"></i></button>
+                        ${isEmployee && !c.employee_signed_at && c.status !== "LOCKED" ? `<button class="btn btn-small btn-primary" onclick="portalSignContract(${c.id})" title="Signer"><i class="fas fa-signature"></i></button>` : ""}
+                    </td></tr>`).join("") || "<tr><td colspan='7'>Aucun contrat enregistré</td></tr>"}
+                </tbody></table>
+                ${(portal.contracts || []).some((c) => c.amendments?.length) ? `<h4 style="margin-top:16px">Avenants</h4>
+                    ${(portal.contracts || []).flatMap((c) => (c.amendments || []).map((a) =>
+                        `<div class="portail-card"><strong>${a.amendment_number}</strong> — ${c.contract_number} — ${a.effective_date}<br>${a.description || ""}</div>`
+                    )).join("")}` : ""}
+            </div>
+
             <div class="portail-section panel" id="tab-conges">
                 <div class="action-bar"><h3>Mes Congés — Solde: ${portal.leave_balance} jours</h3>
                     <button class="btn btn-primary" onclick="requestLeave()"><i class="fas fa-plus"></i> Demander un congé</button></div>
-                <table><thead><tr><th>Type</th><th>Début</th><th>Fin</th><th>Statut</th><th>Motif</th></tr></thead>
-                <tbody>${portal.absences.map((a) => `<tr><td>${a.absence_type}</td><td>${a.start_date}</td><td>${a.end_date}</td>
-                    <td>${statusBadge(a.status)}</td><td>${a.reason || "-"}</td></tr>`).join("")}</tbody></table>
+                <table><thead><tr><th>Début</th><th>Fin</th><th>Jours</th><th>Statut</th><th>Motif</th></tr></thead>
+                <tbody>${portal.absences.map((a) => {
+                    const days = a.days_count || (a.start_date && a.end_date
+                        ? Math.round((new Date(a.end_date) - new Date(a.start_date)) / 86400000) + 1 : "—");
+                    return `<tr><td>${a.start_date}</td><td>${a.end_date}</td><td>${days}</td>
+                    <td>${statusBadge(a.status)}</td><td>${a.reason || "-"}</td></tr>`;
+                }).join("")}</tbody></table>
             </div>
 
             <div class="portail-section panel" id="tab-presences">
@@ -1917,7 +2006,10 @@ async function renderPortailEmploye() {
                 if (sec) { sec.classList.add("active"); sec.style.display = "block"; }
             };
         });
-    } catch (e) { contentArea.innerHTML = `<p class="error-message">${e.message}</p>`; }
+    } catch (e) {
+        contentArea.innerHTML = `<div class="panel"><p class="error-message">${portalFriendlyError(e)}</p>
+            <button class="btn btn-secondary" onclick="renderPortailEmploye()"><i class="fas fa-redo"></i> Réessayer</button></div>`;
+    }
 }
 
 window.changePortalEmployee = (id) => {
@@ -2261,8 +2353,9 @@ async function renderCustomizationDetail(moduleId) {
 }
 
 function renderFeatureRows(features) {
-    if (!features?.length) return `<p class="feature-help">Aucune fonctionnalité — cliquez sur ➕ pour en ajouter.</p>`;
-    return features.sort((a, b) => a.display_order - b.display_order).map((f) => `
+    const visible = (features || []).filter((f) => f.feature_type !== "leave_type");
+    if (!visible.length) return `<p class="feature-help">Aucune fonctionnalité — cliquez sur ➕ pour en ajouter.</p>`;
+    return visible.sort((a, b) => a.display_order - b.display_order).map((f) => `
         <div class="custom-row">
             <div>
                 <strong>${f.feature_name}</strong> <span class="badge-status badge-draft">${f.feature_type}</span>

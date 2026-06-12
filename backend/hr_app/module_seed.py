@@ -7,19 +7,21 @@ DEFAULT_MODULES = [
      'ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE'),
     ('admin-personnel', 'Admin. Personnel', 'Gestion administrative des employés', 'fa-users-cog', 2,
      'ADMIN_RH,GESTIONNAIRE_RH'),
-    ('paie', 'Gestion de la Paie', 'Calcul et bulletins de paie RDC', 'fa-money-bill-wave', 3,
-     'ADMIN_RH,GESTIONNAIRE_RH'),
-    ('presences', 'Présences & Congés', 'Suivi des présences et demandes de congés', 'fa-calendar-check', 4,
+    ('contrats', 'Contrats', 'Gestion du cycle de vie des contrats de travail', 'fa-file-contract', 3,
      'ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE,EMPLOYE'),
-    ('recrutement', 'Recrutement', 'Processus de recrutement et candidatures', 'fa-user-plus', 5,
+    ('paie', 'Gestion de la Paie', 'Calcul et bulletins de paie RDC', 'fa-money-bill-wave', 4,
      'ADMIN_RH,GESTIONNAIRE_RH'),
-    ('formation', 'Formation', 'Plan de formation et certifications', 'fa-graduation-cap', 6,
+    ('presences', 'Présences & Congés', 'Suivi des présences et demandes de congés', 'fa-calendar-check', 5,
+     'ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE,EMPLOYE'),
+    ('recrutement', 'Recrutement', 'Processus de recrutement et candidatures', 'fa-user-plus', 6,
      'ADMIN_RH,GESTIONNAIRE_RH'),
-    ('performances', 'Performances', 'Évaluations et objectifs', 'fa-star', 7,
+    ('formation', 'Formation', 'Plan de formation et certifications', 'fa-graduation-cap', 7,
+     'ADMIN_RH,GESTIONNAIRE_RH'),
+    ('performances', 'Performances', 'Évaluations et objectifs', 'fa-star', 8,
      'ADMIN_RH,GESTIONNAIRE_RH,RESPONSABLE_HIERARCHIQUE'),
-    ('portail-employe', 'Portail Employé', 'Espace personnel de l\'employé', 'fa-user-circle', 8,
+    ('portail-employe', 'Portail Employé', 'Espace personnel de l\'employé', 'fa-user-circle', 9,
      'ADMIN_RH,GESTIONNAIRE_RH,EMPLOYE'),
-    ('reporting', 'Reporting & Statistiques', 'Rapports et exports RH', 'fa-chart-pie', 9,
+    ('reporting', 'Reporting & Statistiques', 'Rapports et exports RH', 'fa-chart-pie', 10,
      'ADMIN_RH,GESTIONNAIRE_RH'),
 ]
 
@@ -60,6 +62,7 @@ PORTAL_SECTIONS = [
     ('dashboard', 'Tableau de bord', 'fa-chart-line', 'Vue synthétique personnelle'),
     ('profil', 'Mon Profil', 'fa-user', 'Informations personnelles et professionnelles'),
     ('bulletins', 'Mes bulletins de paie', 'fa-file-invoice-dollar', 'Historique des bulletins de paie'),
+    ('contrats', 'Mes contrats', 'fa-file-contract', 'Contrats de travail et avenants'),
     ('conges', 'Mes congés', 'fa-umbrella-beach', 'Demandes et solde de congés'),
     ('presences', 'Mes présences', 'fa-clock', 'Présences et missions'),
     ('formations', 'Mes formations', 'fa-graduation-cap', 'Formations et programmes'),
@@ -103,6 +106,11 @@ LEAVE_TYPES = [
     ('autorisation_absence', 'Autorisation d\'absence', {'max_days': 1, 'approval_workflow': 'manager', 'days_granted': 0}),
     ('mission_professionnelle', 'Mission professionnelle', {'max_days': 30, 'approval_workflow': 'manager_rh', 'days_granted': 0}),
     ('deplacement_professionnel', 'Déplacement professionnel', {'max_days': 15, 'approval_workflow': 'manager', 'days_granted': 0}),
+]
+
+ADMIN_PERSONNEL_TABS = [
+    ('onglet_employes', 'Employés', 'fa-users', 'Liste et gestion des dossiers employés'),
+    ('onglet_contrats', 'Contrats', 'fa-file-contract', 'Contrats de travail par employé'),
 ]
 
 PRESENCE_TABS = [
@@ -230,6 +238,16 @@ def seed_module_config():
             },
         )
 
+    personnel = module_map['admin-personnel']
+    for i, (fkey, fname, icon, fdesc) in enumerate(ADMIN_PERSONNEL_TABS):
+        ModuleFeature.objects.update_or_create(
+            module=personnel, feature_key=fkey,
+            defaults={
+                'feature_name': fname, 'description': fdesc, 'icon': icon,
+                'feature_type': 'menu_tab', 'is_active': True, 'display_order': i,
+            },
+        )
+
     presences = module_map['presences']
     for i, (fkey, fname, icon, fdesc) in enumerate(PRESENCE_TABS):
         ModuleFeature.objects.update_or_create(
@@ -239,15 +257,24 @@ def seed_module_config():
                 'feature_type': 'menu_tab', 'is_active': True, 'display_order': i,
             },
         )
+    # Types de congés désactivés — gestion directe via les demandes de congés
     for i, (fkey, fname, config) in enumerate(LEAVE_TYPES):
         ModuleFeature.objects.update_or_create(
             module=presences, feature_key=fkey,
             defaults={
                 'feature_name': fname, 'description': f'Workflow: {config.get("approval_workflow", "rh")}',
-                'feature_type': 'leave_type', 'is_active': True, 'display_order': i,
+                'feature_type': 'leave_type', 'is_active': False, 'display_order': i,
                 'config': config,
             },
         )
+    ModuleFeature.objects.filter(
+        module=presences,
+        feature_type='leave_type',
+    ).update(is_active=False)
+    ModuleFeature.objects.filter(
+        module=presences,
+        feature_key__in=('onglet_types', 'onglet_types_conges', 'types_conges'),
+    ).update(is_active=False)
 
     performances = module_map['performances']
     for i, (fkey, fname, config) in enumerate(PERFORMANCE_KPIS):
@@ -281,7 +308,6 @@ def seed_module_config():
             },
         )
 
-    personnel = module_map['admin-personnel']
     for i, row in enumerate(PERSONNEL_FIELDS):
         fkey, fname, ftype, fdesc, required, visible, editable, default = row[:8]
         options = row[8] if len(row) > 8 else []

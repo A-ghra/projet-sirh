@@ -29,6 +29,11 @@
         writable: false,
         configurable: false,
     });
+    Object.defineProperty(window, "OTOMIA_API_FIXED", {
+        value: OTOMIA_API_FIXED,
+        writable: false,
+        configurable: false,
+    });
     Object.defineProperty(window, "OTOMIA_API_HOST", {
         value: OTOMIA_HOST_FIXED,
         writable: false,
@@ -111,7 +116,7 @@
             date: "Date",
             check_in: "Heure d'entrée",
             check_out: "Heure de sortie",
-            absence_type: "Type de congé",
+            absence_type: "Congé",
             start_date: "Date de début",
             end_date: "Date de fin",
             reason: "Motif",
@@ -410,6 +415,7 @@
         }
     });
 
+    console.log("OTOMIA_API_FIXED :", window.OTOMIA_API_FIXED);
     console.log("OTOMIA API :", window.OTOMIA_API_BASE);
     otomiaLog("API:", OTOMIA_API_FIXED, "| Page:", window.location.href);
 })();

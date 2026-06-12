@@ -27,8 +27,9 @@ def employee_has_daily_coverage(employee, d):
         return True
     if employee.absences.filter(status='Approved', start_date__lte=d, end_date__gte=d).exists():
         return True
+    from .mission_service import MISSION_ACTIVE_STATUSES
     if employee.missions.filter(
-        status__in=['Pending', 'Approved', 'Completed'],
+        status__in=MISSION_ACTIVE_STATUSES,
         start_date__lte=d, end_date__gte=d,
     ).exists():
         return True

@@ -16,6 +16,7 @@ from hr_app.models import (
 DEFAULT_PERMISSIONS = {
     'dashboard': {'read': True, 'write': False},
     'admin-personnel': {'read': True, 'write': True},
+    'contrats': {'read': True, 'write': True},
     'paie': {'read': True, 'write': True},
     'presences': {'read': True, 'write': True},
     'recrutement': {'read': True, 'write': True},
@@ -44,6 +45,7 @@ ROLE_PERMISSIONS = {
     'GESTIONNAIRE_PAIE': {
         'dashboard': {'read': True, 'write': False},
         'admin-personnel': {'read': True, 'write': False},
+        'contrats': {'read': False, 'write': False},
         'paie': {'read': True, 'write': True},
         'presences': {'read': True, 'write': False},
         'recrutement': {'read': False, 'write': False},
@@ -56,6 +58,7 @@ ROLE_PERMISSIONS = {
     'RESPONSABLE_HIERARCHIQUE': {
         'dashboard': {'read': True, 'write': False},
         'admin-personnel': {'read': True, 'write': False},
+        'contrats': {'read': True, 'write': False},
         'paie': {'read': False, 'write': False},
         'presences': {'read': True, 'write': True},
         'recrutement': {'read': True, 'write': False},
@@ -68,6 +71,7 @@ ROLE_PERMISSIONS = {
     'EMPLOYE': {
         'dashboard': {'read': True, 'write': False},
         'admin-personnel': {'read': False, 'write': False},
+        'contrats': {'read': True, 'write': False},
         'paie': {'read': False, 'write': False},
         'presences': {'read': True, 'write': True},
         'recrutement': {'read': False, 'write': False},

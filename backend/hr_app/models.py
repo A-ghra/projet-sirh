@@ -353,19 +353,165 @@ class EmployeeMovement(models.Model):
         return f"{self.employee.full_name} - {self.movement_type}"
 
 
+class ContractTypeConfig(models.Model):
+    """Types de contrat configurables par l'administrateur RH."""
+    code = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+    display_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['display_order', 'label']
+
+    def __str__(self):
+        return self.label
+
+
 class Contract(models.Model):
+    STATUS_CHOICES = [
+        ('DRAFT', 'Brouillon'),
+        ('PENDING_SIGNATURE', 'En attente de signature'),
+        ('SIGNED', 'Signé'),
+        ('LOCKED', 'Verrouillé'),
+        ('CANCELLED', 'Annulé'),
+        ('ARCHIVED', 'Archivé'),
+    ]
+    CURRENCY_CHOICES = [('USD', 'USD'), ('CDF', 'CDF')]
+
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='contracts')
-    contract_type = models.CharField(max_length=20, choices=Employee.CONTRACT_CHOICES)
+    contract_number = models.CharField(max_length=50, unique=True, blank=True)
+    contract_type = models.CharField(max_length=50)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
     start_date = models.DateField()
     end_date = models.DateField(blank=True, null=True)
+    duration_months = models.PositiveSmallIntegerField(blank=True, null=True)
+    probation_end_date = models.DateField(blank=True, null=True)
+    assignment_location = models.CharField(max_length=200, blank=True, default='')
+    job_description = models.TextField(blank=True, default='')
+    position_title = models.CharField(max_length=150, blank=True, default='')
+
+    salary_base = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    transport_allowance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    housing_allowance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    responsibility_bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    indemnities = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    benefits_in_kind = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+
     work_days_per_week = models.PositiveSmallIntegerField(default=5, blank=True, null=True)
-    work_schedule = models.CharField(max_length=50, blank=True, default='')
+    work_schedule = models.CharField(max_length=100, blank=True, default='08h00 - 17h00')
+    annual_leave_days = models.DecimalField(max_digits=5, decimal_places=1, default=25)
+    overtime_clause = models.TextField(blank=True, default='')
+    special_clauses = models.TextField(blank=True, default='')
+
+    employee_obligations = models.TextField(blank=True, default='')
+    employer_obligations = models.TextField(blank=True, default='')
+    confidentiality_clause = models.TextField(blank=True, default='')
+    non_compete_clause = models.TextField(blank=True, default='')
+    termination_conditions = models.TextField(blank=True, default='')
+    renewal_conditions = models.TextField(blank=True, default='')
+    other_clauses = models.TextField(blank=True, default='')
+
+    employee_signed_at = models.DateTimeField(blank=True, null=True)
+    employee_signature = models.TextField(blank=True, default='')
+    hr_signed_at = models.DateTimeField(blank=True, null=True)
+    hr_signatory_name = models.CharField(max_length=150, blank=True, default='')
+    hr_signature = models.TextField(blank=True, default='')
+    direction_signed_at = models.DateTimeField(blank=True, null=True)
+    direction_signatory_name = models.CharField(max_length=150, blank=True, default='')
+    direction_signature = models.TextField(blank=True, default='')
+
     benefits = models.JSONField(default=list, blank=True)
     file = models.FileField(upload_to='contracts/', blank=True, null=True)
+    import_description = models.TextField(blank=True, default='')
+    imported_at = models.DateTimeField(blank=True, null=True)
+    imported_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts_imported',
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=[('MANUAL', 'Manuel'), ('IMPORTED', 'Importé'), ('GENERATED', 'Généré')],
+        default='MANUAL',
+    )
     is_active = models.BooleanField(default=True)
+    is_locked = models.BooleanField(default=False)
+    archived_at = models.DateTimeField(blank=True, null=True)
+    cancelled_at = models.DateTimeField(blank=True, null=True)
+    parent_contract = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='renewals',
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts_created',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-start_date', '-id']
 
     def __str__(self):
         return f"Contrat {self.contract_type} - {self.employee.full_name}"
+
+    @property
+    def is_fully_signed(self):
+        return bool(self.employee_signed_at and self.hr_signed_at and self.direction_signed_at)
+
+
+class ContractAmendment(models.Model):
+    STATUS_CHOICES = Contract.STATUS_CHOICES
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='amendments')
+    amendment_number = models.CharField(max_length=50)
+    effective_date = models.DateField()
+    description = models.TextField(blank=True, default='')
+    salary_base = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    position_title = models.CharField(max_length=150, blank=True, default='')
+    end_date = models.DateField(blank=True, null=True)
+    clauses = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
+    employee_signed_at = models.DateTimeField(blank=True, null=True)
+    hr_signed_at = models.DateTimeField(blank=True, null=True)
+    file = models.FileField(upload_to='contracts/amendments/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-effective_date', '-id']
+        unique_together = ('contract', 'amendment_number')
+
+    def __str__(self):
+        return f"Avenant {self.amendment_number} — {self.contract}"
+
+
+class ContractDownloadLog(models.Model):
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='download_logs')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    format = models.CharField(max_length=10, default='pdf')
+    downloaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-downloaded_at']
+
+
+class ContractArchiveLog(models.Model):
+    """Historique des actions et versions sur les contrats."""
+    ACTION_CHOICES = [
+        ('CREATE', 'Création'),
+        ('IMPORT', 'Importation'),
+        ('EXPORT', 'Exportation'),
+        ('UPDATE', 'Modification'),
+        ('DELETE', 'Suppression'),
+        ('ARCHIVE', 'Archivage'),
+        ('VERSION', 'Version'),
+    ]
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='archive_logs')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    note = models.TextField(blank=True, default='')
+    file_snapshot = models.FileField(upload_to='contracts/archive/', blank=True, null=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class Payroll(models.Model):
@@ -507,12 +653,19 @@ class Absence(models.Model):
         ('Rejected', 'Refusé'),
     ]
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='absences')
-    absence_type = models.CharField(max_length=20, choices=ABSENCE_TYPES)
+    absence_type = models.CharField(max_length=20, choices=ABSENCE_TYPES, default='CP')
     start_date = models.DateField()
     end_date = models.DateField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     reason = models.TextField(blank=True, null=True)
+    justification_file = models.FileField(upload_to='leave_justifications/', blank=True, null=True)
     validated_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='validated_absences')
+
+    @property
+    def days_count(self):
+        if self.start_date and self.end_date:
+            return (self.end_date - self.start_date).days + 1
+        return 0
 
     def __str__(self):
         return f"Absence {self.employee.full_name} ({self.start_date} au {self.end_date})"
@@ -597,21 +750,101 @@ class AbsenceAlert(models.Model):
 
 class Mission(models.Model):
     STATUS_CHOICES = [
+        ('PENDING_APPROVAL', 'En attente d\'approbation'),
+        ('APPROVED', 'Approuvée'),
+        ('IN_PROGRESS', 'En cours'),
+        ('COMPLETED', 'Terminée'),
+        ('CANCELLED', 'Annulée'),
+        # Rétrocompatibilité
         ('Pending', 'En attente'),
         ('Approved', 'Approuvé'),
         ('Rejected', 'Refusé'),
         ('Completed', 'Terminé'),
     ]
+    ACTIVE_STATUSES = ('APPROVED', 'IN_PROGRESS', 'COMPLETED', 'Approved', 'Completed')
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='missions')
+    mission_number = models.CharField(max_length=50, blank=True, default='')
     title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default='')
     destination = models.CharField(max_length=200)
+    city = models.CharField(max_length=100, blank=True, default='')
+    province = models.CharField(max_length=100, blank=True, default='')
+    country = models.CharField(max_length=100, blank=True, default='RDC')
+    visited_organization = models.CharField(max_length=200, blank=True, default='')
     start_date = models.DateField()
+    start_time = models.TimeField(blank=True, null=True)
     end_date = models.DateField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
-    description = models.TextField(blank=True, null=True)
+    end_time = models.TimeField(blank=True, null=True)
+    transport_mode = models.CharField(max_length=100, blank=True, default='')
+    accommodation = models.CharField(max_length=150, blank=True, default='')
+    advance_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    daily_allowance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    budget_allocated = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    closure_summary = models.TextField(blank=True, default='')
+    closure_results = models.TextField(blank=True, default='')
+    closure_difficulties = models.TextField(blank=True, default='')
+    closure_recommendations = models.TextField(blank=True, default='')
+    actual_expenses = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    comments = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING_APPROVAL')
+    payroll_synced = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='missions_created',
+    )
+    approved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='missions_approved',
+    )
+    closed_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-start_date', '-id']
 
     def __str__(self):
         return f"{self.title} - {self.employee.full_name}"
+
+
+class MissionDocument(models.Model):
+    DOC_TYPES = [
+        ('order', 'Ordre de mission'),
+        ('invitation', 'Invitation'),
+        ('authorization', 'Autorisation'),
+        ('ticket', 'Billet de transport'),
+        ('receipt', 'Justificatif'),
+        ('closure', 'Rapport de clôture'),
+        ('other', 'Autre'),
+    ]
+    mission = models.ForeignKey(Mission, on_delete=models.CASCADE, related_name='documents')
+    doc_type = models.CharField(max_length=30, choices=DOC_TYPES, default='other')
+    label = models.CharField(max_length=200, blank=True, default='')
+    file = models.FileField(upload_to='missions/')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+
+class MissionAuditLog(models.Model):
+    ACTION_CHOICES = [
+        ('CREATE', 'Création'),
+        ('UPDATE', 'Modification'),
+        ('DELETE', 'Suppression'),
+        ('APPROVE', 'Validation'),
+        ('CANCEL', 'Annulation'),
+        ('START', 'Démarrage'),
+        ('CLOSE', 'Clôture'),
+        ('EXPORT', 'Exportation'),
+    ]
+    mission = models.ForeignKey(Mission, on_delete=models.CASCADE, related_name='audit_logs')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class PayrollExportLog(models.Model):
@@ -665,6 +898,8 @@ class Notification(models.Model):
         ('leave_pending', 'Demande de congé'),
         ('absence_alert', 'Alerte absence'),
         ('absence_auto', 'Absence automatique'),
+        ('contract_expiring', 'Contrat expirant'),
+        ('contract_signed', 'Contrat signé'),
         ('evaluation', 'Nouvelle évaluation'),
         ('training', 'Nouvelle formation'),
         ('document', 'Nouveau document RH'),

@@ -8,7 +8,7 @@ from .views import (
     export_report, export_payslip, export_payslip_individual, export_payslip_individual_download,
     payslip_preview, send_payslip_by_email, export_payroll_month, payroll_summary,
     RoleViewSet, DepartmentViewSet, PositionViewSet, EmployeeViewSet,
-    EmployeeMovementViewSet, ContractViewSet, PayrollViewSet,
+    EmployeeMovementViewSet, ContractViewSet, ContractTypeViewSet, PayrollViewSet,
     AbsenceViewSet, AttendanceViewSet, MissionViewSet, DocumentViewSet,
     RecruitmentViewSet, ApplicantViewSet, TrainingViewSet,
     PerformanceReviewViewSet, EmployeeTrainingResultViewSet,
@@ -30,6 +30,7 @@ router.register(r'positions', PositionViewSet)
 router.register(r'employees', EmployeeViewSet)
 router.register(r'movements', EmployeeMovementViewSet)
 router.register(r'contracts', ContractViewSet)
+router.register(r'contract-types', ContractTypeViewSet)
 router.register(r'payroll', PayrollViewSet)
 router.register(r'absences', AbsenceViewSet)
 router.register(r'attendance', AttendanceViewSet)

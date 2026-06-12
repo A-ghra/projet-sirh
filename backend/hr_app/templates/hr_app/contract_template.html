@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 14mm; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; color: #2c3e50; line-height: 1.4; }
+        .header { display: flex; gap: 12px; border-bottom: 3px solid #1a5f9e; padding-bottom: 10px; margin-bottom: 12px; }
+        .header-logo img { max-height: 55px; max-width: 65px; }
+        .header-info { flex: 1; }
+        .header-info h1 { color: #1a5f9e; margin: 0; font-size: 18px; }
+        .header-info .legal { font-size: 8px; color: #555; margin-top: 4px; }
+        .header-qr img { width: 64px; height: 64px; }
+        .doc-title { background: #1a5f9e; color: white; text-align: center; padding: 8px; margin: 10px 0; border-radius: 4px; }
+        .doc-title h2 { margin: 0; font-size: 14px; letter-spacing: 1px; }
+        .grid-2 { display: flex; gap: 10px; margin-bottom: 10px; }
+        .box { flex: 1; border: 1px solid #d5e6f7; border-radius: 5px; padding: 8px; background: #f8fbff; }
+        .box h3 { color: #1a5f9e; margin: 0 0 6px; font-size: 9.5px; border-bottom: 1px solid #d5e6f7; padding-bottom: 3px; text-transform: uppercase; }
+        .box p { margin: 2px 0; font-size: 9px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+        th { background: #1a5f9e; color: white; padding: 5px 8px; text-align: left; font-size: 9px; }
+        td { border: 1px solid #d5e6f7; padding: 4px 8px; font-size: 9px; }
+        .clause { margin-bottom: 8px; }
+        .clause h4 { color: #1a5f9e; margin: 0 0 4px; font-size: 9.5px; }
+        .clause p { margin: 0; font-size: 9px; text-align: justify; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 16px; gap: 8px; }
+        .sig-box { flex: 1; border: 1px dashed #bbb; border-radius: 5px; padding: 8px; text-align: center; min-height: 70px; font-size: 8.5px; }
+        .sig-box .role { color: #1a5f9e; font-weight: bold; }
+        .stamp { text-align: center; margin: 10px 0; font-size: 8px; color: #888; border: 2px double #ccc; display: inline-block; padding: 6px 16px; border-radius: 4px; }
+        .footer { margin-top: 12px; text-align: center; font-size: 7.5px; color: #95a5a6; border-top: 1px solid #eee; padding-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-logo">
+            {% if logo_uri %}<img src="{{ logo_uri }}" alt="Logo">{% endif %}
+        </div>
+        <div class="header-info">
+            <h1>{{ company.company_acronym }}</h1>
+            <p><strong>{{ company.company_name }}</strong></p>
+            <p class="legal">
+                RCCM : {{ company.rccm }} | ID. NAT : {{ company.id_nat }} | CNSS : {{ company.cnss_number }}<br>
+                {{ company.headquarters_address }} — {{ company.city }}, {{ company.country }}<br>
+                Tél : {{ company.phone_primary }} — {{ company.email }}
+            </p>
+        </div>
+        {% if show_qr %}
+        <div class="header-qr"><img src="{{ qr_uri }}" alt="QR"><small>Vérification</small></div>
+        {% endif %}
+    </div>
+
+    <div class="doc-title">
+        <h2>CONTRAT DE TRAVAIL — {{ contract.contract_type }}</h2>
+        <small>N° {{ contract.contract_number }} | Généré le {{ issued_at|date:"d/m/Y H:i" }}</small>
+    </div>
+
+    <div class="grid-2">
+        <div class="box">
+            <h3>Employé</h3>
+            <p><strong>Matricule :</strong> {{ employee.matricule }}</p>
+            <p><strong>Nom complet :</strong> {{ employee.full_name }}</p>
+            <p><strong>Sexe :</strong> {{ employee.get_gender_display }}</p>
+            <p><strong>Nationalité :</strong> {{ employee.nationality }}</p>
+            <p><strong>Adresse :</strong> {{ employee.address|default:"—" }}</p>
+            <p><strong>Département :</strong> {{ department }}</p>
+            <p><strong>Poste :</strong> {{ contract.position_title|default:employee.position }}</p>
+            <p><strong>Responsable :</strong> {{ manager_name }}</p>
+        </div>
+        <div class="box">
+            <h3>Informations contractuelles</h3>
+            <p><strong>Type :</strong> {{ contract.contract_type }}</p>
+            <p><strong>Date début :</strong> {{ contract.start_date }}</p>
+            <p><strong>Date fin :</strong> {{ contract.end_date|default:"—" }}</p>
+            <p><strong>Durée :</strong> {{ duration_label }}</p>
+            <p><strong>Période d'essai (fin) :</strong> {{ contract.probation_end_date|default:"—" }}</p>
+            <p><strong>Jours/semaine :</strong> {{ contract.work_days_per_week|default:5 }}</p>
+            <p><strong>Horaires :</strong> {{ contract.work_schedule|default:"—" }}</p>
+            <p><strong>Lieu d'affectation :</strong> {{ contract.assignment_location|default:"—" }}</p>
+        </div>
+    </div>
+
+    {% if contract.job_description %}
+    <div class="clause"><h4>Description du poste</h4><p>{{ contract.job_description }}</p></div>
+    {% endif %}
+
+    <table>
+        <thead><tr><th>Élément de rémunération</th><th>Montant ({{ contract.currency }})</th></tr></thead>
+        <tbody>
+            {% for label, val in remuneration_lines %}
+            <tr><td>{{ label }}</td><td>{{ val }}</td></tr>
+            {% endfor %}
+            {% for label, val in benefits_lines %}
+            <tr><td>{{ label }} (avantage)</td><td>{{ val }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="clause"><h4>Obligations de l'employé</h4><p>{{ contract.employee_obligations|default:"Conformément au Code du travail et au règlement intérieur." }}</p></div>
+    <div class="clause"><h4>Obligations de l'employeur</h4><p>{{ contract.employer_obligations|default:"Assurer les conditions de travail, la rémunération et la sécurité." }}</p></div>
+    <div class="clause"><h4>Conditions de résiliation</h4><p>{{ contract.termination_conditions|default:"Selon les dispositions légales en vigueur." }}</p></div>
+    <div class="clause"><h4>Clause de confidentialité</h4><p>{{ contract.confidentiality_clause|default:"L'employé s'engage à la confidentialité des informations de l'entreprise." }}</p></div>
+    {% if contract.special_clauses or contract.overtime_clause %}
+    <div class="clause"><h4>Clause disciplinaire / spéciale</h4><p>{{ contract.special_clauses|default:contract.overtime_clause }}</p></div>
+    {% endif %}
+    <div class="clause"><h4>Références légales</h4><p>{{ labor_code_refs }}</p></div>
+
+    {% if show_signatures %}
+    <div class="signatures">
+        <div class="sig-box">
+            <div class="role">Signature Employé</div>
+            {% if employee_signed %}✅ {{ contract.employee_signed_at|date:"d/m/Y" }}{% else %}⏳ En attente{% endif %}
+            <div class="sig-line">{{ employee.full_name }}</div>
+        </div>
+        <div class="sig-box">
+            <div class="role">Signature Responsable RH</div>
+            {% if hr_signed %}✅ {{ contract.hr_signatory_name }}{% else %}⏳ En attente{% endif %}
+            <div class="sig-line">{{ company.hr_manager_name }}</div>
+        </div>
+        <div class="sig-box">
+            <div class="role">Signature Direction</div>
+            {% if direction_signed %}✅ {{ contract.direction_signatory_name }}{% else %}⏳ En attente{% endif %}
+            <div class="sig-line">{{ company.director_name }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if show_stamp %}
+    <div style="text-align:center"><span class="stamp">CACHET NUMÉRIQUE — {{ company.company_acronym }}</span></div>
+    {% endif %}
+
+    <div class="footer">
+        Hash vérification : {{ verification_hash|slice:":20" }}... | Document généré par OTOMIA RH | {{ generated_by }}
+    </div>
+</body>
+</html>
